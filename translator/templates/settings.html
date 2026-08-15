@@ -79,30 +79,36 @@
               <input id="base_url" name="base_url" type="text" value="{{ settings.base_url }}">
             </div>
 
-            <div class="panel-head">
-              <p class="kicker">辅助模型</p>
-              <h2>摘要 / 校对 / 前作参考</h2>
-            </div>
-
-            <label class="checkbox">
-              <input id="assistant_enabled" name="assistant_enabled" type="checkbox" {% if settings.assistant_enabled %}checked{% endif %}>
-              <span>启用辅助模型（需支持 JSON 输出；翻译仍走樱花）</span>
-            </label>
-
-            <div class="two-col">
-              <div class="field">
-                <label for="assistant_base_url">辅助 Base URL</label>
-                <input id="assistant_base_url" name="assistant_base_url" type="text" value="{{ settings.assistant_base_url }}">
+            <div id="assistant-section">
+              <div class="panel-head">
+                <p class="kicker">辅助模型</p>
+                <h2>摘要 / 校对 / 前作参考</h2>
               </div>
-              <div class="field">
-                <label for="assistant_model">辅助模型</label>
-                <input id="assistant_model" name="assistant_model" type="text" value="{{ settings.assistant_model }}">
-              </div>
-            </div>
 
-            <div class="field">
-              <label for="assistant_api_key">辅助 API Key</label>
-              <input id="assistant_api_key" name="assistant_api_key" type="password" value="{{ settings.assistant_api_key }}" placeholder="本地服务可随意填写">
+              <p class="settings-hint">樱花模型不支持 JSON 输出，仅用于翻译；因此摘要 / 校对 / 前作参考需由辅助模型完成。</p>
+
+              <label class="checkbox">
+                <input id="assistant_enabled" name="assistant_enabled" type="checkbox" {% if settings.assistant_enabled %}checked{% endif %}>
+                <span>启用辅助模型（需支持 JSON 输出；翻译仍走樱花）</span>
+              </label>
+
+              <p class="settings-hint">开启后，摘要 / 校对 / 前作参考由辅助模型承担（如 Mac 上 LM Studio 的 qwen3-8b）；辅助模型需支持 JSON 输出，关闭后这三项自动跳过。</p>
+
+              <div class="two-col">
+                <div class="field">
+                  <label for="assistant_base_url">辅助 Base URL</label>
+                  <input id="assistant_base_url" name="assistant_base_url" type="text" value="{{ settings.assistant_base_url }}">
+                </div>
+                <div class="field">
+                  <label for="assistant_model">辅助模型</label>
+                  <input id="assistant_model" name="assistant_model" type="text" value="{{ settings.assistant_model }}">
+                </div>
+              </div>
+
+              <div class="field">
+                <label for="assistant_api_key">辅助 API Key</label>
+                <input id="assistant_api_key" name="assistant_api_key" type="password" value="{{ settings.assistant_api_key }}" placeholder="本地服务可随意填写">
+              </div>
             </div>
           </div>
 
@@ -133,7 +139,7 @@
                 <h2>仅非 Sakura 生效</h2>
               </div>
 
-              <p class="settings-hint">仅当接口预设为 DeepSeek / 阿里云 / OpenAI Compatible 时生效；Sakura 下翻译用主模型、摘要/校对用辅助模型。留空 = 沿用主模型。</p>
+              <p class="settings-hint">仅当接口预设为 DeepSeek / 阿里云 / OpenAI Compatible 时生效。留空 = 沿用主模型。</p>
 
               <div class="three-col">
                 <div class="field">
@@ -214,11 +220,15 @@
     const modelField = document.getElementById("model");
     const baseUrlField = document.getElementById("base_url");
     const phaseModelOverride = document.getElementById("phase-model-override");
+    const assistantSection = document.getElementById("assistant-section");
 
     function applyPreset() {
       const value = providerField.value;
       if (phaseModelOverride) {
         phaseModelOverride.style.display = value === "sakura" ? "none" : "block";
+      }
+      if (assistantSection) {
+        assistantSection.style.display = value === "sakura" ? "block" : "none";
       }
       if (value === "sakura") {
         if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {

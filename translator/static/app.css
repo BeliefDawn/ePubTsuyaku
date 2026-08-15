@@ -510,6 +510,16 @@ select:focus {
   color: var(--text-tertiary);
 }
 
+#phase-model-override .settings-hint {
+  margin: 0 0 14px;
+  padding: 0 2px;
+}
+
+#assistant-section .settings-hint {
+  margin: 6px 0 12px;
+  padding: 0 2px;
+}
+
 .ref-collapse {
   display: grid;
   gap: 10px;
