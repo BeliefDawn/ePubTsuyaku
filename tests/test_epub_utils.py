@@ -35,6 +35,47 @@ class PrepareDocumentTests(unittest.TestCase):
         self.assertEqual(len(plan.segments), 1)
         self.assertEqual(plan.segments[0]["text"], "僕──常盤孤太郎をからかった。")
 
+    def test_prepare_document_normalizes_literal_br_text_to_newline(self):
+        class FakeItem:
+            file_name = "chapter1.xhtml"
+            id = "chapter1"
+
+            def get_content(self):
+                return """
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <p>一行目&lt;br&gt;二行目</p>
+          </body>
+        </html>
+        """.encode("utf-8")
+
+        plan = prepare_document(FakeItem())
+
+        self.assertEqual(len(plan.segments), 1)
+        self.assertEqual(plan.segments[0]["text"], "一行目\n二行目")
+
+    def test_apply_translations_converts_br_markers_to_real_tags(self):
+        class FakeItem:
+            file_name = "chapter1.xhtml"
+            id = "chapter1"
+
+            def get_content(self):
+                return """
+        <html xmlns="http://www.w3.org/1999/xhtml">
+          <body>
+            <p>原文。</p>
+          </body>
+        </html>
+        """.encode("utf-8")
+
+        plan = prepare_document(FakeItem())
+        translated = {"seg_0001": "第一行<br>第二行<br/>第三行"}
+
+        html = apply_translations(plan, translated)
+
+        self.assertIn("<br/>", html)
+        self.assertNotIn("&lt;br", html)
+
     def test_extract_document_title_prefers_translated_heading(self):
         html = """
         <html xmlns="http://www.w3.org/1999/xhtml">

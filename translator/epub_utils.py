@@ -161,11 +161,12 @@ def _block_text_nodes(element: Tag) -> List[NavigableString]:
 
 
 def _append_segment(blocks: List[SegmentBlock], segments: List[Dict[str, str]], element: Tag, source_text: str) -> None:
-    cleaned_text = source_text.strip()
+    normalized_text = _normalize_br_markers(source_text)
+    cleaned_text = normalized_text.strip()
     if not cleaned_text:
         return
     segment_id = f"seg_{len(blocks) + 1:04d}"
-    blocks.append(SegmentBlock(segment_id=segment_id, element=element, source_text=source_text))
+    blocks.append(SegmentBlock(segment_id=segment_id, element=element, source_text=normalized_text))
     segments.append({"id": segment_id, "text": cleaned_text})
 
 
@@ -294,9 +295,16 @@ def _preserve_whitespace(original: str, translated: str) -> str:
     return f"{leading}{body}{trailing}" if body else original
 
 
+_BR_RE = re.compile(r"(?i)&lt;br\s*/?&gt;|<br\s*/?>")
+
+
+def _normalize_br_markers(text: str) -> str:
+    return _BR_RE.sub("\n", text)
+
+
 def _set_block_text(element: Tag, text: str) -> None:
     element.clear()
-    lines = text.splitlines()
+    lines = _normalize_br_markers(text).splitlines()
     if not lines:
         return
     if len(lines) == 1:
