@@ -161,12 +161,11 @@ def _block_text_nodes(element: Tag) -> List[NavigableString]:
 
 
 def _append_segment(blocks: List[SegmentBlock], segments: List[Dict[str, str]], element: Tag, source_text: str) -> None:
-    normalized_text = _normalize_br_markers(source_text)
-    cleaned_text = normalized_text.strip()
+    cleaned_text = source_text.strip()
     if not cleaned_text:
         return
     segment_id = f"seg_{len(blocks) + 1:04d}"
-    blocks.append(SegmentBlock(segment_id=segment_id, element=element, source_text=normalized_text))
+    blocks.append(SegmentBlock(segment_id=segment_id, element=element, source_text=source_text))
     segments.append({"id": segment_id, "text": cleaned_text})
 
 
