@@ -119,6 +119,15 @@ STRUCTURED_OUTPUT_FAILURE_SNIPPETS = (
 )
 
 
+class JobCancelledError(Exception):
+    pass
+
+
+def _check_cancel(cancel_event: Optional[threading.Event]) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise JobCancelledError("任务已停止")
+
+
 @dataclass
 class PreparedDocument:
     index: int
@@ -998,6 +1007,7 @@ def run_reference_phase(
     log: Callable[[str], None],
     emit: Callable[[str], None],
     reference_fingerprint: str,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     total_document_count = len(prepared_documents)
     reference_profile = new_reference_profile(reference_book_metadata, config.target_language)
@@ -1062,6 +1072,7 @@ def run_reference_phase(
 
     try:
         for prepared in prepared_documents:
+            _check_cancel(cancel_event)
             plan = prepared.plan
             record = prepared.record
             can_reuse_patch = (
@@ -1099,7 +1110,7 @@ def run_reference_phase(
 
         first_error: Optional[BaseException] = None
         while futures:
-            done, _ = wait(list(futures.keys()), return_when=FIRST_COMPLETED)
+            done, _ = wait(list(futures.keys()), timeout=1.0, return_when=FIRST_COMPLETED)
             for future in done:
                 prepared = futures.pop(future)
                 try:
@@ -1111,6 +1122,13 @@ def run_reference_phase(
                         first_error = exc
 
             drain_reference_results()
+
+            if cancel_event is not None and cancel_event.is_set():
+                for pending_future in list(futures.keys()):
+                    pending_future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                executor_shutdown = True
+                raise JobCancelledError("任务已停止")
 
             if first_error is not None:
                 for pending_future in list(futures.keys()):
@@ -1144,6 +1162,7 @@ def run_summary_phase(
     reference_profile: Optional[Dict[str, Any]],
     log: Callable[[str], None],
     emit: Callable[[str], None],
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     total_document_count = len(prepared_documents)
     summary_state = new_story_state(book_metadata)
@@ -1161,6 +1180,7 @@ def run_summary_phase(
     )
 
     for prepared in prepared_documents:
+        _check_cancel(cancel_event)
         plan = prepared.plan
         record = prepared.record
         can_reuse_summary = (
@@ -1451,6 +1471,7 @@ def run_parallel_translation_phase(
     reference_profile: Optional[Dict[str, Any]],
     log: Callable[[str], None],
     emit: Callable[[str], None],
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, int]:
     total_document_count = len(prepared_documents)
     total_batch_count = sum(len(prepared.batches) for prepared in prepared_documents)
@@ -1672,6 +1693,7 @@ def run_parallel_translation_phase(
 
     try:
         for prepared in prepared_documents:
+            _check_cancel(cancel_event)
             record = prepared.record
             if not prepared.plan.segments:
                 set_item_content(prepared.item, prepared.plan.raw_html)
@@ -1715,6 +1737,7 @@ def run_parallel_translation_phase(
             translation_context_snapshot = dict(record.get("translation_context_snapshot") or {})
             prompt_state = story_state_for_prompt(translation_context_snapshot, config.recent_summary_limit)
             for batch_index, batch in enumerate(prepared.batches, start=1):
+                _check_cancel(cancel_event)
                 if batch_index in completed_indices:
                     continue
                 submit_translation(
@@ -1727,7 +1750,7 @@ def run_parallel_translation_phase(
         first_error: Optional[BaseException] = None
         while translation_futures or review_futures:
             active_futures = list(translation_futures.keys()) + list(review_futures.keys())
-            done, _ = wait(active_futures, return_when=FIRST_COMPLETED)
+            done, _ = wait(active_futures, timeout=1.0, return_when=FIRST_COMPLETED)
             successful_translation_results: List[Dict[str, Any]] = []
             successful_review_results: List[Dict[str, Any]] = []
             for future in done:
@@ -1768,6 +1791,16 @@ def run_parallel_translation_phase(
                     )
                     continue
                 persist_batch_result(result)
+
+            if cancel_event is not None and cancel_event.is_set():
+                for pending_future in list(translation_futures.keys()) + list(review_futures.keys()):
+                    pending_future.cancel()
+                translation_executor.shutdown(wait=False, cancel_futures=True)
+                review_executor.shutdown(wait=False, cancel_futures=True)
+                executors_shutdown = True
+                translation_futures.clear()
+                review_futures.clear()
+                raise JobCancelledError("任务已停止")
 
             if first_error is not None:
                 finished_review_futures = [
@@ -1821,6 +1854,7 @@ def run_translation_pipeline(
     config: PipelineConfig,
     log_func: Optional[Callable[[str], None]] = None,
     status_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     def log(message: str) -> None:
         if log_func is None:
@@ -1860,6 +1894,7 @@ def run_translation_pipeline(
 
     reference_profile: Optional[Dict[str, Any]] = None
     if reference_context.enabled:
+        _check_cancel(cancel_event)
         reference_title = reference_context.book_metadata.get("title") or reference_context.input_path.name
         log(f"reference: {reference_title}")
         log(f"reference fingerprint: {reference_context.fingerprint}")
@@ -1871,10 +1906,12 @@ def run_translation_pipeline(
             log=log,
             emit=emit,
             reference_fingerprint=reference_context.fingerprint,
+            cancel_event=cancel_event,
         )
     else:
         log("reference: disabled")
 
+    _check_cancel(cancel_event)
     run_summary_phase(
         config=config,
         prepared_documents=prepared_documents,
@@ -1883,8 +1920,10 @@ def run_translation_pipeline(
         reference_profile=reference_profile,
         log=log,
         emit=emit,
+        cancel_event=cancel_event,
     )
 
+    _check_cancel(cancel_event)
     translation_result = run_parallel_translation_phase(
         config=config,
         prepared_documents=prepared_documents,
@@ -1893,8 +1932,10 @@ def run_translation_pipeline(
         reference_profile=reference_profile,
         log=log,
         emit=emit,
+        cancel_event=cancel_event,
     )
 
+    _check_cancel(cancel_event)
     if config.title_suffix:
         _set_book_title(book, f"{book_metadata['title']}{config.title_suffix}")
 
@@ -1931,6 +1972,7 @@ def run_translation_pipeline_with_retries(
     config: PipelineConfig,
     log_func: Optional[Callable[[str], None]] = None,
     status_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+    cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     def log(message: str) -> None:
         if log_func is None:
@@ -1941,6 +1983,7 @@ def run_translation_pipeline_with_retries(
     total_attempts = max(1, int(config.auto_resume_retries or 0) + 1)
 
     for attempt_index in range(total_attempts):
+        _check_cancel(cancel_event)
         attempt_number = attempt_index + 1
         attempt_config = config if attempt_index == 0 else replace(config, reset_progress=False)
 
@@ -1955,7 +1998,10 @@ def run_translation_pipeline_with_retries(
                 attempt_config,
                 log_func=log_func,
                 status_callback=status_callback,
+                cancel_event=cancel_event,
             )
+        except JobCancelledError:
+            raise
         except Exception as exc:
             failure_message = _exception_summary(exc)
             retryable = is_retryable_run_error(exc)

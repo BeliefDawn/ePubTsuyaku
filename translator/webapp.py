@@ -25,7 +25,7 @@ from .config import (
     resolve_provider_settings,
 )
 from .epub_utils import extract_book_metadata, iter_spine_documents
-from .pipeline import run_translation_pipeline_with_retries
+from .pipeline import JobCancelledError, run_translation_pipeline_with_retries
 
 
 def _sanitize_filename_part(value: str) -> str:
@@ -286,7 +286,7 @@ class JobState:
     def to_public_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["download_url"] = url_for("download_output", job_id=self.id) if self.status == "completed" else None
-        payload["can_start_new_job"] = self.status in {"idle", "completed", "failed"}
+        payload["can_start_new_job"] = self.status in {"idle", "completed", "failed", "cancelled"}
         return payload
 
 
@@ -301,7 +301,11 @@ class JobManager:
         self._lock = threading.RLock()
         self._current_job: Optional[JobState] = None
         self._thread: Optional[threading.Thread] = None
+        self._cancel_event: threading.Event = threading.Event()
         self._settings: Dict[str, Any] = self._load_settings()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
 
     def _settings_path(self) -> Path:
         return self.webui_root / "settings.json"
@@ -683,6 +687,7 @@ class JobManager:
                 book_metadata=book_metadata,
             )
             self._current_job = job
+            self._cancel_event = threading.Event()
             self._thread = threading.Thread(target=self._run_job, args=(job_id, config), daemon=True)
             self._thread.start()
             return job
@@ -705,7 +710,17 @@ class JobManager:
                 config,
                 log_func=lambda message: self._append_log(job_id, message),
                 status_callback=lambda payload: self._apply_event(job_id, payload),
+                cancel_event=self._cancel_event,
             )
+        except JobCancelledError:
+            self._append_log(job_id, "任务已停止。")
+            with self._lock:
+                job = self._get_job(job_id)
+                if job is not None:
+                    job.status = "cancelled"
+                    job.finished_at = time.time()
+                    job.active_workers = 0
+            return
         except Exception as exc:
             failure_message = "".join(traceback.format_exception_only(type(exc), exc)).strip()
             self._append_log(job_id, failure_message)
@@ -815,6 +830,12 @@ def create_app(project_root: Optional[Path] = None) -> Flask:
             flash(str(exc), "error")
             return redirect(url_for("index"))
         flash(f"任务已启动：{job.input_label}", "success")
+        return redirect(url_for("index"))
+
+    @app.post("/stop")
+    def stop():
+        manager.request_cancel()
+        flash("已请求停止当前任务。", "success")
         return redirect(url_for("index"))
 
     @app.get("/api/status")

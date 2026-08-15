@@ -75,7 +75,7 @@
           <span>从零开始跑，忽略旧进度</span>
         </label>
 
-        <button class="primary" type="submit">开始翻译</button>
+        <button class="primary" type="submit" id="start-btn">开始翻译</button>
       </form>
 
       <section class="panel status-panel" id="status-panel">
@@ -165,10 +165,36 @@
     const metaInput = document.getElementById("meta-input");
     const metaOutput = document.getElementById("meta-output");
     const logOutput = document.getElementById("log-output");
+    const startBtn = document.getElementById("start-btn");
+    let startBtnStopping = false;
+
+    function setStartButton(running) {
+      startBtnStopping = running;
+      startBtn.textContent = running ? "停止" : "开始翻译";
+      startBtn.type = running ? "button" : "submit";
+      startBtn.disabled = false;
+    }
+
+    if (startBtn) {
+      startBtn.addEventListener("click", function (event) {
+        if (startBtnStopping) {
+          event.preventDefault();
+          startBtn.textContent = "停止中…";
+          startBtn.disabled = true;
+          fetch("/stop", { method: "POST" }).then(function () {
+            pollStatus();
+          }).catch(function () {
+            startBtn.disabled = false;
+            startBtn.textContent = "停止";
+          });
+        }
+      });
+    }
 
     function updateStatus(snapshot) {
       const job = snapshot.job;
       if (!job) {
+        setStartButton(false);
         statusTitle.textContent = "等待启动";
         statReference.textContent = "0 / 0";
         statSummary.textContent = "0 / 0";
@@ -188,8 +214,10 @@
         queued: "排队中",
         running: job.current_phase === "reference" ? "参考提取中" : (job.current_phase === "summary" ? "摘要进行中" : "翻译进行中"),
         completed: "翻译完成",
-        failed: "运行失败"
+        failed: "运行失败",
+        cancelled: "已停止"
       };
+      setStartButton(job.status === "queued" || job.status === "running");
 
       const total = job.total_document_count || 0;
       const completed = job.completed_count || 0;

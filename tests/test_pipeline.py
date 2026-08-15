@@ -10,7 +10,7 @@ from unittest.mock import patch
 from ebooklib import epub
 
 from translator.config import PipelineConfig
-from translator.pipeline import run_translation_pipeline, run_translation_pipeline_with_retries
+from translator.pipeline import JobCancelledError, run_translation_pipeline, run_translation_pipeline_with_retries
 from translator.state import load_progress
 
 
@@ -364,6 +364,46 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             self.assertTrue(output_path.exists())
             self.assertEqual(result["processed_count"], 2)
+
+    def test_cancel_event_raises_job_cancelled_without_retry(self):
+        class FakeLLMClient:
+            def extract_reference_patch(self, *args, **kwargs):
+                return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
+
+            def summarize(self, *args, **kwargs):
+                return empty_summary_response()
+
+            def translate(self, *args, **kwargs):
+                segments = kwargs["segments"]
+                return {segment["id"]: f"[中文] {segment['text']}" for segment in segments}
+
+            def review(self, *args, **kwargs):
+                return ok_review_response()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            build_sample_epub(input_path)
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="openai-compatible",
+                translation_workers=1,
+            )
+            config.auto_resume_retries = 2
+
+            cancel_event = threading.Event()
+            cancel_event.set()
+
+            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+                with self.assertRaises(JobCancelledError):
+                    run_translation_pipeline_with_retries(config, cancel_event=cancel_event)
+
+            self.assertFalse(output_path.exists())
 
     def test_summary_phase_saves_context_snapshots_without_future_leak(self):
         class FakeLLMClient:

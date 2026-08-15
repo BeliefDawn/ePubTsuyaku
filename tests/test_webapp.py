@@ -53,7 +53,7 @@ class WebAppTests(unittest.TestCase):
         snapshot = None
         while time.time() < deadline:
             snapshot = client.get("/api/status").get_json()
-            if snapshot["job"] and snapshot["job"]["status"] in {"completed", "failed"}:
+            if snapshot["job"] and snapshot["job"]["status"] in {"completed", "failed", "cancelled"}:
                 return snapshot
             time.sleep(0.1)
         return snapshot
@@ -400,6 +400,79 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(second_snapshot["job"]["status"], "completed")
             self.assertEqual(second_snapshot["job"]["processed_count"], 1)
             self.assertEqual(second_snapshot["job"]["skipped_count"], 0)
+
+    def test_stop_cancels_running_job(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "epubOutput").mkdir()
+            sample_path = root / "demo.epub"
+            build_sample_epub(sample_path)
+
+            class SlowClient:
+                def extract_reference_patch(self, *args, **kwargs):
+                    return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
+
+                def summarize(self, *args, **kwargs):
+                    return {
+                        "chapter_summary": "",
+                        "characters": [],
+                        "time_context": [],
+                        "locations": [],
+                        "events": [],
+                        "concepts": [],
+                        "glossary": [],
+                        "style_notes": [],
+                        "open_questions": [],
+                    }
+
+                def translate(self, *args, **kwargs):
+                    time.sleep(3)
+                    return {segment["id"]: f"[中文] {segment['text']}" for segment in kwargs["segments"]}
+
+                def review(self, *args, **kwargs):
+                    return {
+                        "score": 100,
+                        "needs_retry": False,
+                        "major_issues": [],
+                        "minor_issues": [],
+                        "term_updates": [],
+                        "style_updates": [],
+                        "corrected_segments": {},
+                        "retry_feedback": "",
+                    }
+
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: SlowClient()):
+                client.post(
+                    "/start",
+                    data={
+                        "existing_file": str(sample_path),
+                        "source_language": "日语",
+                        "target_language": "中文",
+                        "provider_preset": "mock",
+                        "model": "mock-model",
+                        "translation_workers": "1",
+                        "max_batch_chars": "800",
+                        "max_batch_segments": "16",
+                        "max_review_retries": "0",
+                        "min_review_score": "90",
+                        "recent_summary_limit": "3",
+                        "title_suffix": "（中文译本）",
+                        "reset_progress": "on",
+                    },
+                    follow_redirects=True,
+                )
+
+                time.sleep(0.5)
+                stop_response = client.post("/stop", follow_redirects=True)
+                self.assertEqual(stop_response.status_code, 200)
+
+                snapshot = self._wait_for_job_completion(client, timeout=12)
+                self.assertIsNotNone(snapshot)
+                self.assertEqual(snapshot["job"]["status"], "cancelled")
+                self.assertTrue(snapshot["job"]["can_start_new_job"])
 
     def test_web_ui_auto_resumes_retryable_failures(self):
         shared = {"failed_once": False}
