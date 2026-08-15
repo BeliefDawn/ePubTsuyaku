@@ -50,6 +50,13 @@ class PrepareDocumentTests(unittest.TestCase):
 
         self.assertEqual(title, "[中文] 第一章")
 
+    def test_extract_document_title_falls_back_on_binary_content(self):
+        binary = b"<![5F6bA2p\x0e \x18\x00=flH$D"
+
+        title = extract_document_title(binary, fallback="Fallback")
+
+        self.assertEqual(title, "Fallback")
+
     def test_prepare_document_falls_back_to_br_separated_text(self):
         class FakeItem:
             file_name = "volume.xhtml"

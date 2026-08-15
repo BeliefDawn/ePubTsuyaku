@@ -661,6 +661,7 @@ def _migrate_progress_document(progress: Dict[str, Any]) -> Dict[str, Any]:
         "reference_input_path": reference_input_path,
         "reference_fingerprint": reference_fingerprint,
         "reference_book": reference_book,
+        "assistant_fingerprint": str(progress.get("assistant_fingerprint") or ""),
         "story_state": story_state,
         "reference_phase": _new_reference_phase(reference_book, target_language, reference_enabled),
         "summary_phase": _new_summary_phase(book_metadata),

@@ -311,7 +311,10 @@ def _set_block_text(element: Tag, text: str) -> None:
 
 def extract_document_title(content: Any, fallback: str = "") -> str:
     raw_html = content_to_text(content)
-    soup = BeautifulSoup(raw_html, "html.parser")
+    try:
+        soup = BeautifulSoup(raw_html, "html.parser")
+    except Exception:
+        return _clean_text_value(fallback)
     for tag_name in TITLE_CANDIDATE_TAGS:
         for element in soup.find_all(tag_name):
             text = _clean_text_value("".join(element.stripped_strings))

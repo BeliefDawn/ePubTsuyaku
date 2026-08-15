@@ -15,6 +15,18 @@ from .prompts import (
     build_summary_prompts,
     build_translation_prompts,
 )
+from .state import empty_reference_patch, empty_summary_patch
+
+
+SAKURA_SYSTEM_PROMPT = (
+    "你是一个视觉小说翻译模型，可以通顺地使用给定的术语表以指定的风格将日文翻译成简体中文，"
+    "并联系上下文正确使用人称代词，注意不要混淆使役态和被动态的主语和宾语，"
+    "不要擅自添加原文中没有的特殊符号，也不要擅自增加或减少换行。"
+)
+
+SAKURA_TEMPERATURE = 0.3
+SAKURA_TOP_P = 0.8
+SAKURA_HISTORY_LIMIT = 5
 
 
 def _parse_json_from_text(text: str) -> Any:
@@ -443,6 +455,9 @@ class BaseLLMClient:
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def translate_titles(self, titles: List[str]) -> List[str]:
+        raise NotImplementedError
+
 
 class OpenAICompatibleLLMClient(BaseLLMClient):
     def __init__(
@@ -454,6 +469,7 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         translation_model: Optional[str] = None,
         review_model: Optional[str] = None,
         timeout: int = 300,
+        no_thinking_prompt: bool = False,
     ) -> None:
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.base_url = base_url
@@ -462,6 +478,7 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         self.translation_model = translation_model or model
         self.review_model = review_model or model
         self.timeout = timeout
+        self.no_thinking_prompt = no_thinking_prompt
         self.is_deepseek = self._is_official_deepseek_base_url(base_url)
         self.strict_client = OpenAI(api_key=api_key, base_url=DEEPSEEK_BETA_BASE_URL) if self.is_deepseek else None
 
@@ -587,6 +604,12 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
                 )
             except Exception as exc:
                 strict_error = exc
+
+        if self.no_thinking_prompt:
+            system_prompt = (
+                system_prompt
+                + "\n\n不要思考，直接输出最终结果，不要输出任何推理过程。"
+            )
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -802,6 +825,207 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         expected_ids = [item["id"] for item in source_segments]
         return _normalize_review_payload(payload, expected_ids)
 
+    def translate_titles(self, titles: List[str]) -> List[str]:
+        if not titles:
+            return []
+        prompt = (
+            "你是一名翻译助手。请把下面的每一行文本从日语翻译成简体中文。"
+            "输出必须保持与输入相同的行数，每行只输出对应的翻译，"
+            "不要输出编号、注释、解释或多余内容。\n"
+            + "\n".join(titles)
+        )
+        max_tokens = min(4096, max(256, sum(len(title) for title in titles) * 3 + 64))
+        response = self._complete(
+            messages=[{"role": "user", "content": prompt}],
+            model=self.translation_model,
+            temperature=0.1,
+            max_tokens=max_tokens,
+        )
+        lines = [line.strip() for line in response.split("\n") if line.strip()]
+        result = lines[: len(titles)]
+        if len(result) < len(titles):
+            result = result + titles[len(result) :]
+        return result
+
+
+class SakuraLLMClient(BaseLLMClient):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: Optional[str],
+        model: str,
+        timeout: int = 300,
+        assistant_client: Optional[OpenAICompatibleLLMClient] = None,
+    ) -> None:
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.base_url = base_url
+        self.model = model
+        self.timeout = timeout
+        self._assistant = assistant_client
+        self._history: List[str] = []
+        self._glossary: List[Dict[str, str]] = []
+
+    @staticmethod
+    def _estimate_translation_max_tokens(segments: List[Dict[str, str]]) -> int:
+        total_chars = sum(len(segment.get("text", "")) for segment in segments)
+        total_segments = len(segments)
+        return min(8192, max(1536, total_chars * 3 + total_segments * 24))
+
+    def _build_user_prompt(self, input_text: str) -> str:
+        parts: List[str] = []
+        if self._history:
+            history_lines = self._history[-SAKURA_HISTORY_LIMIT:]
+            parts.append("历史翻译：" + "\n".join(history_lines))
+        if self._glossary:
+            glossary_lines: List[str] = []
+            for item in self._glossary:
+                line = f"{item['source']}->{item['target']}"
+                note = item.get("note")
+                if note:
+                    line += f" #{note}"
+                glossary_lines.append(line)
+            parts.append("参考以下术语表（可为空，格式为src->dst #备注）：\n" + "\n".join(glossary_lines))
+        parts.append("根据以上术语表的对应关系和备注，结合历史剧情和上下文，将下面的文本从日文翻译成简体中文：")
+        parts.append(input_text)
+        return "\n\n".join(parts)
+
+    def _request(self, user_prompt: str, max_tokens: Optional[int]) -> str:
+        request_kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SAKURA_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": SAKURA_TEMPERATURE,
+            "top_p": SAKURA_TOP_P,
+            "timeout": self.timeout,
+        }
+        if max_tokens is not None:
+            request_kwargs["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(**request_kwargs)
+        return _extract_message_text(response.choices[0].message.content)
+
+    def extract_reference_patch(
+        self,
+        book_metadata: Dict[str, str],
+        reference_profile: Dict[str, Any],
+        segments: List[Dict[str, str]],
+        target_language: str,
+    ) -> Dict[str, Any]:
+        if self._assistant is not None:
+            return self._assistant.extract_reference_patch(
+                book_metadata=book_metadata,
+                reference_profile=reference_profile,
+                segments=segments,
+                target_language=target_language,
+            )
+        return empty_reference_patch()
+
+    def summarize(
+        self,
+        book_metadata: Dict[str, str],
+        story_state: Dict[str, Any],
+        segments: List[Dict[str, str]],
+        source_language: str,
+        target_language: str,
+        reference_profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if self._assistant is not None:
+            return self._assistant.summarize(
+                book_metadata=book_metadata,
+                story_state=story_state,
+                segments=segments,
+                source_language=source_language,
+                target_language=target_language,
+                reference_profile=reference_profile,
+            )
+        return empty_summary_patch()
+
+    def translate(
+        self,
+        book_metadata: Dict[str, str],
+        story_state: Dict[str, Any],
+        segments: List[Dict[str, str]],
+        source_language: str,
+        target_language: str,
+        retry_feedback: Optional[str] = None,
+        reference_profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
+        glossary = story_state.get("glossary") or []
+        self._glossary = [
+            {
+                "source": str(item.get("source") or ""),
+                "target": str(item.get("target") or ""),
+                "note": str(item.get("note") or ""),
+            }
+            for item in glossary
+            if isinstance(item, dict) and item.get("source") and item.get("target")
+        ]
+        result: Dict[str, str] = {}
+        pending = list(segments)
+        max_tokens = self._estimate_translation_max_tokens(segments)
+
+        for _ in range(3):
+            if not pending:
+                break
+            input_text = "\n".join(segment["text"] for segment in pending)
+            response_text = self._request(self._build_user_prompt(input_text), max_tokens=max_tokens)
+            lines = [line.strip() for line in response_text.split("\n") if line.strip()]
+            for segment, translation in zip(pending, lines):
+                result[segment["id"]] = translation
+            missing_ids = {segment["id"] for segment in pending if not result.get(segment["id"])}
+            pending = [segment for segment in pending if segment["id"] in missing_ids]
+
+        missing_ids = [segment["id"] for segment in segments if not result.get(segment["id"])]
+        if missing_ids:
+            raise RuntimeError(f"缺少片段译文: {', '.join(missing_ids)}")
+
+        self._history = [result[segment["id"]] for segment in segments]
+        return result
+
+    def review(
+        self,
+        book_metadata: Dict[str, str],
+        story_state: Dict[str, Any],
+        source_segments: List[Dict[str, str]],
+        translated_segments: List[Dict[str, str]],
+        source_language: str,
+        target_language: str,
+        reference_profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if self._assistant is not None:
+            return self._assistant.review(
+                book_metadata=book_metadata,
+                story_state=story_state,
+                source_segments=source_segments,
+                translated_segments=translated_segments,
+                source_language=source_language,
+                target_language=target_language,
+                reference_profile=reference_profile,
+            )
+        return {
+            "score": 100,
+            "needs_retry": False,
+            "major_issues": [],
+            "minor_issues": [],
+            "term_updates": [],
+            "style_updates": [],
+            "corrected_segments": {},
+            "retry_feedback": "",
+        }
+
+    def translate_titles(self, titles: List[str]) -> List[str]:
+        if not titles:
+            return []
+        input_text = "\n".join(titles)
+        max_tokens = min(4096, max(512, sum(len(title) for title in titles) * 3 + len(titles) * 24))
+        response_text = self._request(self._build_user_prompt(input_text), max_tokens=max_tokens)
+        lines = [line.strip() for line in response_text.split("\n") if line.strip()]
+        result = lines[: len(titles)]
+        if len(result) < len(titles):
+            result = result + titles[len(result) :]
+        return result
+
 
 class MockLLMClient(BaseLLMClient):
     def extract_reference_patch(
@@ -873,3 +1097,6 @@ class MockLLMClient(BaseLLMClient):
             "corrected_segments": {},
             "retry_feedback": "",
         }
+
+    def translate_titles(self, titles: List[str]) -> List[str]:
+        return [f"[translated] {title}" for title in titles]

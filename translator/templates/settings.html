@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设置 - ePubTsuyaku Studio</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="backdrop"></div>
+  <main class="shell">
+    <nav class="topbar">
+      <button class="theme-btn" onclick="toggleTheme()" title="切换主题">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a class="ghost" href="{{ url_for('index') }}">返回翻译</a>
+    </nav>
+    <section class="hero">
+      <p class="eyebrow">ePubTsuyaku Studio</p>
+      <h1>设置</h1>
+      <p class="intro">接口、模型与流水线参数保存在本机，重启后仍然生效。</p>
+    </section>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <section class="flash-stack">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </section>
+      {% endif %}
+    {% endwith %}
+
+    <section>
+      <form class="panel form-panel settings-form" method="post" action="{{ url_for('save_settings') }}">
+        <div class="settings-cols">
+          <div class="settings-col">
+            <div class="panel-head">
+              <p class="kicker">书籍</p>
+              <h2>目录</h2>
+            </div>
+
+            <div class="field">
+              <label for="book_dirs">书籍目录</label>
+              <input id="book_dirs" name="book_dirs" type="text" value="{{ settings.book_dirs }}">
+              <p class="settings-hint">首页「选择现有 EPUB」会列出项目目录与该目录内的 epub。</p>
+            </div>
+
+            <div class="panel-head">
+              <p class="kicker">接口</p>
+              <h2>Provider 与模型</h2>
+            </div>
+
+            <div class="field">
+              <label for="provider_preset">接口预设</label>
+              <select id="provider_preset" name="provider_preset">
+                <option value="sakura" {% if settings.provider_preset == 'sakura' %}selected{% endif %}>Sakura (本地 llama.cpp / LM Studio)</option>
+                <option value="deepseek" {% if settings.provider_preset == 'deepseek' %}selected{% endif %}>DeepSeek</option>
+                <option value="aliyun" {% if settings.provider_preset == 'aliyun' %}selected{% endif %}>阿里云 DashScope</option>
+                <option value="openai-compatible" {% if settings.provider_preset == 'openai-compatible' %}selected{% endif %}>OpenAI Compatible</option>
+                <option value="auto" {% if settings.provider_preset == 'auto' %}selected{% endif %}>Auto (读环境变量)</option>
+                <option value="mock" {% if settings.provider_preset == 'mock' %}selected{% endif %}>Mock</option>
+              </select>
+            </div>
+
+            <div class="two-col">
+              <div class="field">
+                <label for="api_key">API Key</label>
+                <input id="api_key" name="api_key" type="password" value="{{ settings.api_key }}" placeholder="可临时粘贴，不写入磁盘">
+              </div>
+              <div class="field">
+                <label for="model">模型</label>
+                <input id="model" name="model" type="text" value="{{ settings.model }}">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="base_url">Base URL</label>
+              <input id="base_url" name="base_url" type="text" value="{{ settings.base_url }}">
+            </div>
+
+            <div class="panel-head">
+              <p class="kicker">辅助模型</p>
+              <h2>摘要 / 校对 / 前作参考</h2>
+            </div>
+
+            <label class="checkbox">
+              <input id="assistant_enabled" name="assistant_enabled" type="checkbox" {% if settings.assistant_enabled %}checked{% endif %}>
+              <span>启用辅助模型（需支持 JSON 输出；翻译仍走樱花）</span>
+            </label>
+
+            <div class="two-col">
+              <div class="field">
+                <label for="assistant_base_url">辅助 Base URL</label>
+                <input id="assistant_base_url" name="assistant_base_url" type="text" value="{{ settings.assistant_base_url }}">
+              </div>
+              <div class="field">
+                <label for="assistant_model">辅助模型</label>
+                <input id="assistant_model" name="assistant_model" type="text" value="{{ settings.assistant_model }}">
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="assistant_api_key">辅助 API Key</label>
+              <input id="assistant_api_key" name="assistant_api_key" type="password" value="{{ settings.assistant_api_key }}" placeholder="本地服务可随意填写">
+            </div>
+          </div>
+
+          <div class="settings-col">
+            <div class="panel-head">
+              <p class="kicker">流水线并发</p>
+              <h2>摘要 / 翻译 / 参考</h2>
+            </div>
+
+            <div class="three-col">
+              <div class="field">
+                <label for="translation_workers">翻译并发数</label>
+                <input id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="{{ settings.translation_workers }}">
+              </div>
+              <div class="field">
+                <label for="review_workers">校对并发数</label>
+                <input id="review_workers" name="review_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="{{ settings.review_workers }}">
+              </div>
+              <div class="field">
+                <label for="reference_workers">参考并发数</label>
+                <input id="reference_workers" name="reference_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="{{ settings.reference_workers }}">
+              </div>
+            </div>
+
+            <div id="phase-model-override">
+              <div class="panel-head">
+                <p class="kicker">分阶段模型覆盖</p>
+                <h2>仅非 Sakura 生效</h2>
+              </div>
+
+              <p class="settings-hint">仅当接口预设为 DeepSeek / 阿里云 / OpenAI Compatible 时生效；Sakura 下翻译用主模型、摘要/校对用辅助模型。留空 = 沿用主模型。</p>
+
+              <div class="three-col">
+                <div class="field">
+                  <label for="summary_model">摘要模型</label>
+                  <input id="summary_model" name="summary_model" type="text" placeholder="默认沿用主模型" value="{{ settings.summary_model }}">
+                </div>
+                <div class="field">
+                  <label for="translation_model">翻译模型</label>
+                  <input id="translation_model" name="translation_model" type="text" placeholder="默认沿用主模型" value="{{ settings.translation_model }}">
+                </div>
+                <div class="field">
+                  <label for="review_model">校对模型</label>
+                  <input id="review_model" name="review_model" type="text" placeholder="默认沿用主模型" value="{{ settings.review_model }}">
+                </div>
+              </div>
+            </div>
+
+            <div class="panel-head">
+              <p class="kicker">批次与校对</p>
+              <h2>质量与速度</h2>
+            </div>
+
+            <div class="three-col">
+              <div class="field">
+                <label for="max_batch_chars">单批字符数</label>
+                <input id="max_batch_chars" name="max_batch_chars" type="number" min="300" step="100" value="{{ settings.max_batch_chars }}">
+              </div>
+              <div class="field">
+                <label for="max_batch_segments">单批片段数</label>
+                <input id="max_batch_segments" name="max_batch_segments" type="number" min="1" step="1" value="{{ settings.max_batch_segments }}">
+              </div>
+              <div class="field">
+                <label for="max_review_retries">最大重试次数</label>
+                <input id="max_review_retries" name="max_review_retries" type="number" min="0" step="1" value="{{ settings.max_review_retries }}">
+              </div>
+            </div>
+
+            <div class="three-col">
+              <div class="field">
+                <label for="min_review_score">最低校对分</label>
+                <input id="min_review_score" name="min_review_score" type="number" min="1" max="100" step="1" value="{{ settings.min_review_score }}">
+              </div>
+              <div class="field">
+                <label for="recent_summary_limit">保留最近摘要数</label>
+                <input id="recent_summary_limit" name="recent_summary_limit" type="number" min="1" step="1" value="{{ settings.recent_summary_limit }}">
+              </div>
+              <div class="field">
+                <label for="title_suffix">输出标题后缀</label>
+                <input id="title_suffix" name="title_suffix" type="text" value="{{ settings.title_suffix }}">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="primary" type="submit">保存设置</button>
+          <a class="ghost" href="{{ url_for('index') }}">返回翻译</a>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const root = document.documentElement;
+      root.classList.toggle("dark");
+      localStorage.setItem("epubtsuyaku-theme", root.classList.contains("dark") ? "dark" : "");
+    }
+    (function initTheme() {
+      const saved = localStorage.getItem("epubtsuyaku-theme");
+      if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+    })();
+
+    const providerDefaults = {{ provider_defaults|tojson }};
+    const providerField = document.getElementById("provider_preset");
+    const modelField = document.getElementById("model");
+    const baseUrlField = document.getElementById("base_url");
+    const phaseModelOverride = document.getElementById("phase-model-override");
+
+    function applyPreset() {
+      const value = providerField.value;
+      if (phaseModelOverride) {
+        phaseModelOverride.style.display = value === "sakura" ? "none" : "block";
+      }
+      if (value === "sakura") {
+        if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {
+          modelField.value = providerDefaults.sakura_model;
+        }
+        baseUrlField.value = providerDefaults.sakura_base_url;
+      } else if (value === "deepseek") {
+        if (!modelField.value || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {
+          modelField.value = providerDefaults.deepseek_model;
+        }
+        if (!baseUrlField.value || baseUrlField.value === providerDefaults.aliyun_base_url) {
+          baseUrlField.value = providerDefaults.deepseek_base_url;
+        }
+      } else if (value === "aliyun") {
+        if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.openai_model) {
+          modelField.value = providerDefaults.aliyun_model;
+        }
+        baseUrlField.value = providerDefaults.aliyun_base_url;
+      } else if (value === "openai-compatible") {
+        if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model) {
+          modelField.value = providerDefaults.openai_model;
+        }
+      } else if (value === "mock") {
+        modelField.value = "mock-model";
+        baseUrlField.value = "";
+      }
+    }
+
+    providerField.addEventListener("change", applyPreset);
+    applyPreset();
+  </script>
+</body>
+</html>

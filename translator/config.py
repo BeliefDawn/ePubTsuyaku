@@ -32,6 +32,10 @@ class PipelineConfig:
     summary_model: str
     translation_model: str
     review_model: str
+    assistant_enabled: bool = False
+    assistant_base_url: Optional[str] = None
+    assistant_model: Optional[str] = None
+    assistant_api_key: Optional[str] = None
     translation_workers: int = 4
     review_workers: int = 0
     reference_workers: int = 0
@@ -75,6 +79,12 @@ def resolve_provider_settings(
 ) -> tuple[str, Optional[str], Optional[str], str]:
     if provider == "mock":
         return "mock", None, None, explicit_model or "mock-model"
+
+    if provider == "sakura":
+        api_key = "sk-no-key-required"
+        model = explicit_model or project_model("Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf")
+        base_url = explicit_base_url or project_base_url() or "http://localhost:8080/v1"
+        return "sakura", api_key, base_url, model
 
     if api_key_env:
         api_key = os.environ.get(api_key_env)

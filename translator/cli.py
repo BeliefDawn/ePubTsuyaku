@@ -48,9 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-lang", default="中文", help="目标语言，默认中文。")
     parser.add_argument(
         "--provider",
-        choices=("auto", "openai-compatible", "mock"),
+        choices=("auto", "sakura", "openai-compatible", "mock"),
         default="auto",
-        help="LLM 提供方。mock 用于本地联调。",
+        help="LLM 提供方。sakura 走本地 llama.cpp / LM Studio（Sakura 提示词），mock 用于本地联调。",
     )
     parser.add_argument("--api-key-env", help="指定从哪个环境变量读取 API Key。")
     parser.add_argument("--base-url", help="OpenAI 兼容接口的 base_url。")
@@ -58,6 +58,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary-model", help="要素提取阶段模型名。")
     parser.add_argument("--translation-model", help="初翻阶段模型名。")
     parser.add_argument("--review-model", help="校对阶段模型名。")
+    parser.add_argument("--assistant-base-url", help="辅助模型（摘要/校对/参考）的 OpenAI 兼容 base_url。")
+    parser.add_argument("--assistant-model", help="辅助模型名。")
+    parser.add_argument("--assistant-api-key", help="辅助模型 API Key。")
     parser.add_argument("--translation-workers", type=int, default=4, help="翻译阶段的并发 worker 数。")
     parser.add_argument("--review-workers", type=int, default=0, help="校对阶段的并发 worker 数，默认沿用翻译并发数。")
     parser.add_argument("--reference-workers", type=int, default=0, help="参考 EPUB 提取阶段的并发 worker 数，默认沿用翻译并发数。")
@@ -118,6 +121,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         summary_model=args.summary_model or model,
         translation_model=args.translation_model or model,
         review_model=args.review_model or model,
+        assistant_enabled=bool(args.assistant_base_url),
+        assistant_base_url=args.assistant_base_url,
+        assistant_model=args.assistant_model,
+        assistant_api_key=args.assistant_api_key,
         translation_workers=max(1, args.translation_workers),
         review_workers=max(0, args.review_workers),
         reference_workers=max(0, args.reference_workers),

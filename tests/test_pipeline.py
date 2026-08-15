@@ -155,6 +155,102 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertIn("[中文] 第二章", nav)
             self.assertIn("Demo Book（中文译本）", translated_book.title)
 
+    def test_pipeline_with_binary_image_item_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input_with_image.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            book = epub.EpubBook()
+            book.set_identifier("image-book")
+            book.set_title("Image Book")
+            book.set_language("ja")
+            book.add_author("Tester")
+
+            chapter = epub.EpubHtml(title="第一章", file_name="chapter1.xhtml", lang="ja")
+            chapter.content = """
+            <?xml version='1.0' encoding='utf-8'?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body>
+                <h1>第一章</h1>
+                <p>太郎は学校へ行った。</p>
+              </body>
+            </html>
+            """
+            book.add_item(chapter)
+
+            image = epub.EpubImage()
+            image.file_name = "images/cover.png"
+            image.media_type = "image/png"
+            image.content = b"<![5F6bA2p\x0e \x18\x00=flH$D"
+            book.add_item(image)
+
+            book.toc = (chapter,)
+            book.spine = ["nav", chapter]
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
+            epub.write_epub(str(input_path), book, {})
+
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="mock",
+            )
+
+            result = run_translation_pipeline(config)
+
+            self.assertTrue(output_path.exists())
+            self.assertTrue(progress_path.exists())
+            self.assertEqual(result["processed_count"], 1)
+            translated_book = epub.read_epub(str(output_path))
+            self.assertIsNotNone(translated_book.get_item_with_href("chapter1.xhtml"))
+
+    def test_missing_toc_titles_are_translated(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            book = epub.EpubBook()
+            book.set_identifier("toc-book")
+            book.set_title("Toc Book")
+            book.set_language("ja")
+            book.add_author("Tester")
+
+            chapter = epub.EpubHtml(title="女の子の皮を着てオナニーをする話", file_name="chapter1.xhtml", lang="ja")
+            chapter.content = """
+            <?xml version='1.0' encoding='utf-8'?>
+            <html xmlns="http://www.w3.org/1999/xhtml">
+              <body>
+                <p>太郎は学校へ行った。</p>
+              </body>
+            </html>
+            """
+            book.add_item(chapter)
+            book.toc = (epub.Link("chapter1.xhtml", "女の子の皮を着てオナニーをする話", "chapter1"),)
+            book.spine = ["nav", chapter]
+            book.add_item(epub.EpubNcx())
+            book.add_item(epub.EpubNav())
+            epub.write_epub(str(input_path), book, {})
+
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="mock",
+            )
+
+            result = run_translation_pipeline(config)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(result["processed_count"], 1)
+            translated_book = epub.read_epub(str(output_path))
+            nav = translated_book.get_item_with_id("nav").get_content().decode("utf-8")
+            self.assertIn("[translated] 女の子の皮を着てオナニーをする話", nav)
+
     def test_pipeline_does_not_retry_when_score_is_low_but_no_retry_requested(self):
         shared = {"translate_calls": 0}
 
@@ -196,6 +292,78 @@ class PipelineIntegrationTests(unittest.TestCase):
                 run_translation_pipeline(config)
 
             self.assertEqual(shared["translate_calls"], 2)
+
+    def test_review_failure_degrades_to_pass_without_aborting(self):
+        class FakeLLMClient:
+            def extract_reference_patch(self, *args, **kwargs):
+                return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
+
+            def summarize(self, *args, **kwargs):
+                return empty_summary_response()
+
+            def translate(self, *args, **kwargs):
+                segments = kwargs["segments"]
+                return {segment["id"]: f"[中文] {segment['text']}" for segment in segments}
+
+            def review(self, *args, **kwargs):
+                raise RuntimeError("Mac backend OOM")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            build_sample_epub(input_path)
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="openai-compatible",
+                translation_workers=1,
+            )
+
+            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+                result = run_translation_pipeline(config)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(result["processed_count"], 2)
+
+    def test_summary_failure_degrades_to_empty_patch_without_aborting(self):
+        class FakeLLMClient:
+            def extract_reference_patch(self, *args, **kwargs):
+                return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
+
+            def summarize(self, *args, **kwargs):
+                raise RuntimeError("Mac backend OOM")
+
+            def translate(self, *args, **kwargs):
+                segments = kwargs["segments"]
+                return {segment["id"]: f"[中文] {segment['text']}" for segment in segments}
+
+            def review(self, *args, **kwargs):
+                return ok_review_response()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            build_sample_epub(input_path)
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="openai-compatible",
+                translation_workers=1,
+            )
+
+            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+                result = run_translation_pipeline(config)
+
+            self.assertTrue(output_path.exists())
+            self.assertEqual(result["processed_count"], 2)
 
     def test_summary_phase_saves_context_snapshots_without_future_leak(self):
         class FakeLLMClient:

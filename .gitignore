@@ -9,3 +9,5 @@ epubOutput/*.epub
 .webui/
 progress.*.json
 /*.epub
+web_backup_*/
+

@@ -58,7 +58,7 @@ class WebAppTests(unittest.TestCase):
             time.sleep(0.1)
         return snapshot
 
-    def test_web_ui_uses_updated_deepseek_defaults(self):
+    def test_web_ui_uses_sakura_defaults(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             app = create_app(project_root=root)
@@ -70,15 +70,66 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn("ePubTsuyaku Studio", html)
             self.assertIn("ePubTsuyaku 的同一套翻译流水线", html)
-            self.assertIn('value="deepseek-v4-flash"', html)
-            self.assertIn('value="4000"', html)
             self.assertIn('id="reference_existing_file"', html)
-            self.assertIn('id="reference_manual_input_path"', html)
             self.assertIn("参考提取", html)
-            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="4"', html)
-            self.assertIn('id="review_workers" name="review_workers" type="number" min="0" step="1"', html)
-            self.assertIn('id="reference_workers" name="reference_workers" type="number" min="0" step="1"', html)
-            self.assertIn('"deepseek_model": "deepseek-v4-flash"', html)
+            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="4"', client.get("/settings").get_data(as_text=True))
+
+            settings_html = client.get("/settings").get_data(as_text=True)
+            self.assertIn('<option value="sakura" selected>', settings_html)
+            self.assertIn('value="Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf"', settings_html)
+            self.assertIn('value="http://localhost:8080/v1"', settings_html)
+            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="4"', settings_html)
+            self.assertIn('value="4000"', settings_html)
+            self.assertIn('id="book_dirs" name="book_dirs" type="text" value="E:\\Pictures\\小说输出（2023.6.7）"', settings_html)
+            self.assertIn('id="phase-model-override"', settings_html)
+            self.assertIn('"sakura_model": "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf"', settings_html)
+
+    def test_settings_are_persisted_and_loaded(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            response = client.post(
+                "/settings",
+                data={
+                    "provider_preset": "openai-compatible",
+                    "api_key": "test-key",
+                    "model": "custom-model",
+                    "base_url": "http://localhost:9999/v1",
+                    "summary_model": "",
+                    "translation_model": "",
+                    "review_model": "",
+                    "assistant_enabled": "on",
+                    "assistant_base_url": "http://192.168.5.20:1234/v1",
+                    "assistant_model": "qwen3-8b",
+                    "assistant_api_key": "lm-studio",
+                    "translation_workers": "3",
+                    "review_workers": "",
+                    "reference_workers": "",
+                    "max_batch_chars": "3000",
+                    "max_batch_segments": "32",
+                    "max_review_retries": "1",
+                    "min_review_score": "80",
+                    "recent_summary_limit": "3",
+                    "title_suffix": "（测试译本）",
+                },
+                follow_redirects=True,
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue((root / ".webui" / "settings.json").exists())
+
+            app2 = create_app(project_root=root)
+            client2 = app2.test_client()
+            settings_html = client2.get("/settings").get_data(as_text=True)
+            self.assertIn('<option value="openai-compatible" selected>', settings_html)
+            self.assertIn('value="custom-model"', settings_html)
+            self.assertIn('value="http://localhost:9999/v1"', settings_html)
+            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="3"', settings_html)
+            self.assertIn('value="3000"', settings_html)
+            self.assertIn('id="assistant_enabled" name="assistant_enabled" type="checkbox" checked', settings_html)
+            self.assertIn('value="http://192.168.5.20:1234/v1"', settings_html)
+            self.assertIn('value="qwen3-8b"', settings_html)
 
     def test_discover_epub_files_skips_output_dir(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -91,6 +142,26 @@ class WebAppTests(unittest.TestCase):
 
             self.assertEqual(len(files), 1)
             self.assertTrue(files[0]["path"].endswith("book.epub"))
+
+    def test_discover_epub_files_includes_book_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_sample_epub(root / "book.epub")
+
+            book_dir = root / "books"
+            book_dir.mkdir()
+            build_sample_epub(book_dir / "external.epub")
+            nested = book_dir / "sub"
+            nested.mkdir()
+            build_sample_epub(nested / "nested.epub")
+
+            files = discover_epub_files(root, str(book_dir))
+
+            paths = [item["path"] for item in files]
+            self.assertEqual(len(paths), 3)
+            self.assertTrue(any(path.endswith("book.epub") for path in paths))
+            self.assertTrue(any(path.endswith("external.epub") for path in paths))
+            self.assertTrue(any(path.endswith("nested.epub") for path in paths))
 
     def test_web_ui_can_start_mock_job(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -207,18 +278,19 @@ class WebAppTests(unittest.TestCase):
             html = response.get_data(as_text=True)
 
             self.assertEqual(response.status_code, 200)
-            self.assertIn(f'value="{sample_path}"', html)
-            self.assertIn('<option value="mock" selected>', html)
             self.assertIn('value="简体中文"', html)
-            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="7"', html)
-            self.assertIn('id="review_workers" name="review_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="3"', html)
-            self.assertIn('id="reference_workers" name="reference_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="2"', html)
-            self.assertIn('value="900"', html)
-            self.assertIn('value="23"', html)
-            self.assertIn('value="（测试译本）"', html)
             snapshot = self._wait_for_job_completion(client)
             self.assertIsNotNone(snapshot)
             self.assertEqual(snapshot["job"]["status"], "completed")
+
+            settings_html = client.get("/settings").get_data(as_text=True)
+            self.assertIn('<option value="mock" selected>', settings_html)
+            self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="7"', settings_html)
+            self.assertIn('id="review_workers" name="review_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="3"', settings_html)
+            self.assertIn('id="reference_workers" name="reference_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="2"', settings_html)
+            self.assertIn('value="900"', settings_html)
+            self.assertIn('value="23"', settings_html)
+            self.assertIn('value="（测试译本）"', settings_html)
 
     def test_uploaded_epub_resume_reuses_progress_on_same_file(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

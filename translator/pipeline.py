@@ -22,7 +22,7 @@ from .epub_utils import (
     prepare_document,
     set_item_content,
 )
-from .llm import MockLLMClient, OpenAICompatibleLLMClient
+from .llm import MockLLMClient, OpenAICompatibleLLMClient, SakuraLLMClient
 from .state import (
     create_progress_document,
     empty_reference_patch,
@@ -142,6 +142,25 @@ def _build_llm_client(config: PipelineConfig):
         return MockLLMClient()
     if not config.api_key:
         raise RuntimeError("缺少 API Key。")
+    if config.provider == "sakura":
+        assistant = None
+        if config.assistant_enabled and config.assistant_base_url:
+            assistant_model = config.assistant_model or config.model
+            assistant = OpenAICompatibleLLMClient(
+                api_key=config.assistant_api_key or "sk-no-key-required",
+                base_url=config.assistant_base_url,
+                model=assistant_model,
+                summary_model=assistant_model,
+                translation_model=assistant_model,
+                review_model=assistant_model,
+                no_thinking_prompt=True,
+            )
+        return SakuraLLMClient(
+            api_key=config.api_key,
+            base_url=config.base_url,
+            model=config.model,
+            assistant_client=assistant,
+        )
     return OpenAICompatibleLLMClient(
         api_key=config.api_key,
         base_url=config.base_url,
@@ -238,6 +257,12 @@ def _create_progress_for_run(
     )
 
 
+def _assistant_fingerprint(config: PipelineConfig) -> str:
+    if not config.assistant_enabled or not config.assistant_base_url:
+        return ""
+    return f"{config.assistant_base_url}|{config.assistant_model or ''}"
+
+
 def _validate_or_create_progress(
     config: PipelineConfig,
     book_metadata: Dict[str, str],
@@ -246,9 +271,12 @@ def _validate_or_create_progress(
     if config.reset_progress and config.progress_path.exists():
         config.progress_path.unlink()
 
+    assistant_fp = _assistant_fingerprint(config)
     progress = load_progress(config.progress_path)
     if progress is None:
-        return _create_progress_for_run(config, book_metadata, reference_context)
+        progress = _create_progress_for_run(config, book_metadata, reference_context)
+        progress["assistant_fingerprint"] = assistant_fp
+        return progress
 
     same_task = (
         progress.get("input_path") == str(config.input_path)
@@ -256,10 +284,14 @@ def _validate_or_create_progress(
         and progress.get("target_language") == config.target_language
         and bool(progress.get("reference_enabled")) == reference_context.enabled
         and str(progress.get("reference_fingerprint") or "") == reference_context.fingerprint
+        and str(progress.get("assistant_fingerprint") or "") == assistant_fp
     )
     if not same_task:
-        return _create_progress_for_run(config, book_metadata, reference_context)
+        progress = _create_progress_for_run(config, book_metadata, reference_context)
+        progress["assistant_fingerprint"] = assistant_fp
+        return progress
 
+    progress["assistant_fingerprint"] = assistant_fp
     progress["output_path"] = str(config.output_path)
     progress["book"] = dict(book_metadata)
     progress["reference_enabled"] = reference_context.enabled
@@ -271,7 +303,9 @@ def _validate_or_create_progress(
         and progress.get("target_language") == config.target_language
     )
     if not same_pair:
-        return _create_progress_for_run(config, book_metadata, reference_context)
+        progress = _create_progress_for_run(config, book_metadata, reference_context)
+        progress["assistant_fingerprint"] = assistant_fp
+        return progress
     return progress
 
 
@@ -421,6 +455,8 @@ def _rewrite_toc_titles(entries: Any, title_lookup: Dict[str, str], prefix: str 
 def _build_translated_title_lookup(book: Any) -> Dict[str, str]:
     title_lookup: Dict[str, str] = {}
     for item in book.get_items():
+        if getattr(item, "get_type", lambda: None)() != ebooklib.ITEM_DOCUMENT:
+            continue
         file_name = getattr(item, "file_name", None)
         item_id = getattr(item, "id", None) or getattr(item, "uid", None)
         if not file_name and not item_id:
@@ -437,6 +473,60 @@ def _build_translated_title_lookup(book: Any) -> Dict[str, str]:
             title_lookup[str(file_name)] = translated_title
         if item_id:
             title_lookup[str(item_id)] = translated_title
+    return title_lookup
+
+
+def _iter_toc_entries(entries: Any):
+    for entry in entries or []:
+        if isinstance(entry, tuple) and len(entry) == 2:
+            head, children = entry
+            if head is not None:
+                yield head
+            yield from _iter_toc_entries(children)
+        elif entry is not None:
+            yield entry
+
+
+def _translate_missing_toc_titles(
+    book: Any,
+    config: PipelineConfig,
+    title_lookup: Dict[str, str],
+) -> Dict[str, str]:
+    missing: List[tuple[Any, List[str], str]] = []
+    for entry in _iter_toc_entries(book.toc):
+        candidates = _toc_target_candidates(entry)
+        if not candidates:
+            continue
+        if any(title_lookup.get(candidate) for candidate in candidates):
+            continue
+        original = getattr(entry, "title", None) or getattr(entry, "text", None) or ""
+        if not str(original).strip():
+            continue
+        missing.append((entry, candidates, str(original)))
+
+    if not missing:
+        return title_lookup
+
+    ordered_titles: List[str] = []
+    seen: set[str] = set()
+    for _, _, original in missing:
+        if original not in seen:
+            seen.add(original)
+            ordered_titles.append(original)
+
+    try:
+        client = _build_llm_client(config)
+        translated = client.translate_titles(ordered_titles)
+    except Exception:
+        return title_lookup
+
+    translation_by_title = dict(zip(ordered_titles, translated))
+    for entry, candidates, original in missing:
+        translated_title = translation_by_title.get(original, "")
+        if not translated_title:
+            continue
+        for candidate in candidates:
+            title_lookup[candidate] = translated_title
     return title_lookup
 
 
@@ -809,11 +899,13 @@ def _summarize_segments_resilient(
         )
     except Exception as exc:
         if not _is_structured_output_failure(exc) or len(segments) <= 1:
-            raise
+            log(f"[assistant-skip] summary {len(segments)} segments: {_exception_summary(exc)}")
+            return empty_summary_patch()
 
         left_segments, right_segments = _split_segments_balanced(segments)
         if not right_segments:
-            raise
+            log(f"[assistant-skip] summary split failed: {_exception_summary(exc)}")
+            return empty_summary_patch()
 
         indent = "  " * max(1, depth + 1)
         log(
@@ -1309,18 +1401,35 @@ def _review_batch_worker(
     prompt_reference_profile: Optional[Dict[str, Any]],
     attempt: int,
     thread_local: threading.local,
+    log: Callable[[str], None],
 ) -> Dict[str, Any]:
     llm_client = _get_thread_local_llm_client(config, thread_local)
     translated_segments = _translated_segments_as_list(batch, translations)
-    review_payload = llm_client.review(
-        book_metadata=book_metadata,
-        story_state=prompt_state,
-        source_segments=batch,
-        translated_segments=translated_segments,
-        source_language=config.source_language,
-        target_language=config.target_language,
-        reference_profile=prompt_reference_profile,
-    )
+    try:
+        review_payload = llm_client.review(
+            book_metadata=book_metadata,
+            story_state=prompt_state,
+            source_segments=batch,
+            translated_segments=translated_segments,
+            source_language=config.source_language,
+            target_language=config.target_language,
+            reference_profile=prompt_reference_profile,
+        )
+    except Exception as exc:
+        log(
+            f"[assistant-skip] {prepared.plan.file_name} batch {batch_index}: "
+            f"{exc.__class__.__name__}: {exc}"
+        )
+        review_payload = {
+            "score": 100,
+            "needs_retry": False,
+            "major_issues": [],
+            "minor_issues": [],
+            "term_updates": [],
+            "style_updates": [],
+            "corrected_segments": {},
+            "retry_feedback": "",
+        }
     corrected_translations = _apply_review_corrections(translations, review_payload)
     return {
         "file_name": prepared.plan.file_name,
@@ -1557,6 +1666,7 @@ def run_parallel_translation_phase(
             prompt_reference_profile=translation_result.get("prompt_reference_profile"),
             attempt=int(translation_result.get("attempt", 0) or 0),
             thread_local=review_thread_local,
+            log=log,
         )
         review_futures[future] = prepared
 
@@ -1790,6 +1900,7 @@ def run_translation_pipeline(
 
     _prepare_output_book_metadata(book, config.target_language)
     translated_title_lookup = _build_translated_title_lookup(book)
+    translated_title_lookup = _translate_missing_toc_titles(book, config, translated_title_lookup)
     _ensure_book_item_identifiers(book)
     book.toc = tuple(_rewrite_toc_titles(_normalize_toc(book.toc), translated_title_lookup))
     config.output_path.parent.mkdir(parents=True, exist_ok=True)

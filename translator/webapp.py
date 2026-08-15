@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import threading
 import time
@@ -41,6 +42,8 @@ def _default_model_for_preset(provider_preset: str) -> str:
         return "qwen-max"
     if provider_preset == "mock":
         return "mock-model"
+    if provider_preset == "sakura":
+        return "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf"
     return "gpt-4.1-mini"
 
 
@@ -52,15 +55,19 @@ def _default_form_state() -> Dict[str, Any]:
         "reference_manual_input_path": "",
         "source_language": "日语",
         "target_language": "中文",
-        "provider_preset": "deepseek",
-        "api_key": "",
-        "model": "deepseek-v4-flash",
-        "base_url": DEEPSEEK_BASE_URL,
+        "provider_preset": "sakura",
+        "api_key": "sk-no-key-required",
+        "model": "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf",
+        "base_url": "http://localhost:8080/v1",
         "summary_model": "",
         "translation_model": "",
         "review_model": "",
+        "assistant_enabled": True,
+        "assistant_base_url": "http://192.168.5.20:1234/v1",
+        "assistant_model": "qwen3-8b",
+        "assistant_api_key": "lm-studio",
         "translation_workers": "4",
-        "review_workers": "",
+        "review_workers": "2",
         "reference_workers": "",
         "max_batch_chars": "4000",
         "max_batch_segments": "64",
@@ -68,7 +75,8 @@ def _default_form_state() -> Dict[str, Any]:
         "min_review_score": "85",
         "recent_summary_limit": "5",
         "title_suffix": "（中文译本）",
-        "reset_progress": True,
+        "book_dirs": "E:\\Pictures\\小说输出（2023.6.7）",
+        "reset_progress": False,
     }
 
 
@@ -87,6 +95,9 @@ def _form_state_from_form_data(form_data: Dict[str, str]) -> Dict[str, Any]:
         "summary_model",
         "translation_model",
         "review_model",
+        "assistant_base_url",
+        "assistant_model",
+        "assistant_api_key",
         "translation_workers",
         "review_workers",
         "reference_workers",
@@ -96,11 +107,13 @@ def _form_state_from_form_data(form_data: Dict[str, str]) -> Dict[str, Any]:
         "min_review_score",
         "recent_summary_limit",
         "title_suffix",
+        "book_dirs",
     ):
         value = form_data.get(key)
         if value is not None:
             state[key] = value
     state["reset_progress"] = form_data.get("reset_progress") == "on"
+    state["assistant_enabled"] = form_data.get("assistant_enabled") == "on"
     return state
 
 
@@ -127,26 +140,39 @@ def _safe_upload_name(original_name: str, content_hash: str) -> str:
     return f"{safe_stem}.{content_hash[:12]}{suffix}"
 
 
-def discover_epub_files(project_root: Path) -> List[Dict[str, str]]:
+def discover_epub_files(project_root: Path, book_dirs: str = "") -> List[Dict[str, str]]:
     seen = set()
     result: List[Dict[str, str]] = []
     excluded = {".git", "__pycache__", "epubOutput", ".webui"}
 
-    for path in sorted(project_root.rglob("*.epub")):
-        relative_parts = path.relative_to(project_root).parts
-        if any(part in excluded for part in relative_parts):
+    roots = [project_root]
+    for raw in (book_dirs or "").split(";"):
+        raw = raw.strip()
+        if not raw:
             continue
-        resolved = str(path.resolve())
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        result.append(
-            {
-                "path": resolved,
-                "label": str(path.relative_to(project_root)),
-                "name": path.name,
-            }
-        )
+        extra = Path(raw).expanduser()
+        if extra.is_dir():
+            roots.append(extra)
+
+    for root in roots:
+        for path in sorted(root.rglob("*.epub")):
+            if any(part in excluded for part in path.parts):
+                continue
+            resolved = str(path.resolve())
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            try:
+                label = str(path.relative_to(project_root))
+            except ValueError:
+                label = str(path)
+            result.append(
+                {
+                    "path": resolved,
+                    "label": label,
+                    "name": path.name,
+                }
+            )
     return result
 
 
@@ -174,6 +200,14 @@ def resolve_web_provider_settings(
 
     if provider_preset == "mock":
         return "mock", None, None, clean_model or "mock-model"
+
+    if provider_preset == "sakura":
+        return (
+            "sakura",
+            "sk-no-key-required",
+            clean_base_url or "http://localhost:8080/v1",
+            clean_model or "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf",
+        )
 
     if provider_preset == "deepseek":
         effective_key = clean_key or os.environ.get("DEEPSEEK_API_KEY")
@@ -267,7 +301,33 @@ class JobManager:
         self._lock = threading.RLock()
         self._current_job: Optional[JobState] = None
         self._thread: Optional[threading.Thread] = None
-        self._last_form_state: Dict[str, Any] = _default_form_state()
+        self._settings: Dict[str, Any] = self._load_settings()
+
+    def _settings_path(self) -> Path:
+        return self.webui_root / "settings.json"
+
+    def _load_settings(self) -> Dict[str, Any]:
+        settings = _default_form_state()
+        path = self._settings_path()
+        if not path.exists():
+            return settings
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return settings
+        if not isinstance(data, dict):
+            return settings
+        for key in settings:
+            if key in data:
+                settings[key] = data[key]
+        return settings
+
+    def _save_settings(self) -> None:
+        self.webui_root.mkdir(parents=True, exist_ok=True)
+        self._settings_path().write_text(
+            json.dumps(self._settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _get_job(self, job_id: str) -> Optional[JobState]:
         if self._current_job and self._current_job.id == job_id:
@@ -276,17 +336,17 @@ class JobManager:
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
-            files = discover_epub_files(self.project_root)
+            files = discover_epub_files(self.project_root, self._settings.get("book_dirs") or "")
             if self._current_job is None:
                 return {
                     "job": None,
                     "available_files": files,
-                    "form_state": dict(self._last_form_state),
+                    "form_state": dict(self._settings),
                 }
             return {
                 "job": self._current_job.to_public_dict(),
                 "available_files": files,
-                "form_state": dict(self._last_form_state),
+                "form_state": dict(self._settings),
             }
 
     def _append_log(self, job_id: str, message: str) -> None:
@@ -506,7 +566,14 @@ class JobManager:
             if self._current_job and self._current_job.status == "running":
                 raise RuntimeError("当前已有翻译任务在运行，请等待完成后再启动新任务。")
 
-            self._last_form_state = _form_state_from_form_data(form_data)
+            effective = dict(self._settings)
+            for key, value in form_data.items():
+                if key == "reset_progress":
+                    continue
+                effective[key] = value
+            effective["reset_progress"] = form_data.get("reset_progress") == "on"
+            self._settings = effective
+            form_data = effective
             job_id = uuid.uuid4().hex[:10]
             input_path, input_label = self._resolve_input_source(
                 job_id,
@@ -571,6 +638,10 @@ class JobManager:
                 summary_model=(form_data.get("summary_model") or "").strip() or resolved_model,
                 translation_model=(form_data.get("translation_model") or "").strip() or resolved_model,
                 review_model=(form_data.get("review_model") or "").strip() or resolved_model,
+                assistant_enabled=bool(form_data.get("assistant_enabled")),
+                assistant_base_url=(form_data.get("assistant_base_url") or "").strip() or None,
+                assistant_model=(form_data.get("assistant_model") or "").strip() or None,
+                assistant_api_key=(form_data.get("assistant_api_key") or "").strip() or None,
                 translation_workers=translation_workers,
                 review_workers=review_workers,
                 reference_workers=reference_workers,
@@ -702,14 +773,42 @@ def create_app(project_root: Optional[Path] = None) -> Flask:
                 "deepseek_model": "deepseek-v4-flash",
                 "aliyun_model": "qwen-max",
                 "openai_model": "gpt-4.1-mini",
+                "sakura_model": "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf",
                 "deepseek_base_url": DEEPSEEK_BASE_URL,
                 "aliyun_base_url": ALIYUN_BASE_URL,
+                "sakura_base_url": "http://localhost:8080/v1",
             },
         )
 
+    @app.get("/settings")
+    def settings_page():
+        with manager._lock:
+            settings = dict(manager._settings)
+        return render_template(
+            "settings.html",
+            settings=settings,
+            provider_defaults={
+                "deepseek_model": "deepseek-v4-flash",
+                "aliyun_model": "qwen-max",
+                "openai_model": "gpt-4.1-mini",
+                "sakura_model": "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf",
+                "deepseek_base_url": DEEPSEEK_BASE_URL,
+                "aliyun_base_url": ALIYUN_BASE_URL,
+                "sakura_base_url": "http://localhost:8080/v1",
+            },
+        )
+
+    @app.post("/settings")
+    def save_settings():
+        settings = _form_state_from_form_data(request.form.to_dict())
+        with manager._lock:
+            manager._settings = settings
+            manager._save_settings()
+        flash("设置已保存。", "success")
+        return redirect(url_for("settings_page"))
+
     @app.post("/start")
     def start():
-        manager._last_form_state = _form_state_from_form_data(request.form.to_dict())
         try:
             job = manager.start_job(request.form.to_dict(), request.files)
         except Exception as exc:

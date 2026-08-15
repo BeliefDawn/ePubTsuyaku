@@ -2,6 +2,38 @@
 
 > ePubTsuyaku is an LLM-based EPUB translation workspace with resumable pipeline, reference-volume consistency, OpenAI-compatible backends, and a local Web UI.
 
+## 本 Fork 相对上游的改动
+
+> 本仓库是对 [Tritium0041/ePubTsuyaku](https://github.com/Tritium0041/ePubTsuyaku) 的增强分支，改动均为增量，未改动核心流水线结构，上游可直接合并吸收。
+
+### 本地模型支持（樱花 / llama.cpp / LM Studio）
+
+- 新增 `SakuraLLMClient`：使用樱花 v3 提示词（`[History]` / `[Glossary]` / `[Input]`，温度 0.3 / top_p 0.8），接入本地 `llama.cpp` 或 `LM Studio` 的 OpenAI 兼容接口（`http://localhost:8080/v1` 或 `http://localhost:1234/v1`），纯文本按行映射回片段，缺行自动补发。
+- 接口预设新增 `Sakura (本地 llama.cpp / LM Studio)`，默认即樱花；`--provider sakura` 命令行也可用。
+
+### 双模型：辅助模型（摘要 / 校对 / 前作参考）
+
+- 樱花只负责翻译；摘要、校对、前作参考可交给第二个支持 JSON 的本地/远程模型（如 Mac 上 LM Studio 的 qwen3-8b）。
+- 设置页「辅助模型」区可配置 Base URL / 模型 / API Key；辅助模型自动关闭思考模式（提示词层）。
+- 辅助阶段失败自动降级（跳过该批校对 / 空摘要），不会中止整本书；翻译阶段失败仍严格中止重试。
+- 摘要生成的术语表会注入樱花翻译的 `[Glossary]` 段，翻译阶段直接按术语表用词。
+
+### 功能增强
+
+- **章节 / 目录标题翻译**：正文缺少标题标签的章节，其目录标题会用 LLM 翻译。
+- **书籍目录**：设置页可配置书籍目录，首页下拉直接列出项目目录 + 书籍目录内的 epub。
+- **进度指纹**：切换辅助模型配置会使旧进度自动失效，避免误复用。
+
+### Web UI 优化
+
+- 设置页改为双栏布局，配置**落盘持久化**（`.webui/settings.json`），重启不丢。
+- 明/暗双主题切换（跟随系统 + 手动切换，localStorage 记忆）。
+- 首页精简：仅保留选书下拉、前作参考（可折叠/合并为下拉占位）、语言、开始按钮。
+
+### Bug 修复
+
+- 修复含二进制资源（图片 / 字体 / CSS 等）的 EPUB 在重建阶段崩溃（`_build_translated_title_lookup` 只处理文档条目，`extract_document_title` 解析容错）。
+
 `ePubTsuyaku` 是一个面向长篇 EPUB 的翻译工具。它不是“一次把整章丢给模型机翻”的脚本，而是一条完整流水线：
 
 1. 按 `spine` 顺序读取正文，先做全书上下文整理

@@ -9,10 +9,16 @@
 <body>
   <div class="backdrop"></div>
   <main class="shell">
+    <nav class="topbar">
+      <button class="theme-btn" onclick="toggleTheme()" title="切换主题">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <a class="ghost" href="{{ url_for('settings_page') }}">设置</a>
+    </nav>
     <section class="hero">
       <p class="eyebrow">ePubTsuyaku Studio</p>
-      <h1>别再手写命令了。</h1>
-      <p class="intro">在一个页面里完成选书、填模型、启动翻译、看进度和下载结果。后台由 ePubTsuyaku 的同一套翻译流水线执行。</p>
+      <h1>选书，然后开始。</h1>
+      <p class="intro">接口、模型与流水线参数请在「设置」页维护，本机保存、重启不丢。后台由 ePubTsuyaku 的同一套翻译流水线执行。</p>
     </section>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -29,52 +35,28 @@
       <form class="panel form-panel" method="post" action="{{ url_for('start') }}" enctype="multipart/form-data">
         <div class="panel-head">
           <p class="kicker">1. 新建任务</p>
-          <h2>翻译配置</h2>
+          <h2>选书与语言</h2>
         </div>
 
         <div class="field">
-          <label for="existing_file">选择现有 EPUB</label>
           <select id="existing_file" name="existing_file">
-            <option value="">请选择</option>
+            <option value="">请选择要翻译的文档。</option>
             {% for item in state.available_files %}
               <option value="{{ item.path }}" {% if state.form_state.existing_file == item.path %}selected{% endif %}>{{ item.label }}</option>
             {% endfor %}
           </select>
         </div>
 
-        <div class="field">
-          <label for="manual_input_path">或直接填路径</label>
-          <input id="manual_input_path" name="manual_input_path" type="text" placeholder="/absolute/path/to/book.epub" value="{{ state.form_state.manual_input_path }}">
-        </div>
-
-        <div class="field">
-          <label for="upload_file">或上传一个新文件</label>
-          <input id="upload_file" name="upload_file" type="file" accept=".epub">
-        </div>
-
-        <div class="panel-head">
-          <p class="kicker">前作参考（可选）</p>
-          <h2>系列一致性参考</h2>
-        </div>
-
-        <div class="field">
-          <label for="reference_existing_file">选择前作精翻 EPUB</label>
-          <select id="reference_existing_file" name="reference_existing_file">
-            <option value="">不使用</option>
-            {% for item in state.available_files %}
-              <option value="{{ item.path }}" {% if state.form_state.reference_existing_file == item.path %}selected{% endif %}>{{ item.label }}</option>
-            {% endfor %}
-          </select>
-        </div>
-
-        <div class="field">
-          <label for="reference_manual_input_path">或直接填前作路径</label>
-          <input id="reference_manual_input_path" name="reference_manual_input_path" type="text" placeholder="/absolute/path/to/reference.epub" value="{{ state.form_state.reference_manual_input_path }}">
-        </div>
-
-        <div class="field">
-          <label for="reference_upload_file">或上传一个前作 EPUB</label>
-          <input id="reference_upload_file" name="reference_upload_file" type="file" accept=".epub">
+        <div class="ref-collapse">
+          <div class="field">
+            <select id="reference_existing_file" name="reference_existing_file">
+              <option value="">使用前作参考（可选）</option>
+              {% for item in state.available_files %}
+                <option value="{{ item.path }}" {% if state.form_state.reference_existing_file == item.path %}selected{% endif %}>{{ item.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <p class="settings-hint">选同一系列的精翻前作，可保持人名 / 术语 / 文风一致。</p>
         </div>
 
         <div class="two-col">
@@ -86,94 +68,6 @@
             <label for="target_language">目标语言</label>
             <input id="target_language" name="target_language" type="text" value="{{ state.form_state.target_language }}">
           </div>
-        </div>
-
-        <div class="field">
-          <label for="provider_preset">接口预设</label>
-          <select id="provider_preset" name="provider_preset">
-            <option value="deepseek" {% if state.form_state.provider_preset == 'deepseek' %}selected{% endif %}>DeepSeek</option>
-            <option value="aliyun" {% if state.form_state.provider_preset == 'aliyun' %}selected{% endif %}>阿里云 DashScope</option>
-            <option value="openai-compatible" {% if state.form_state.provider_preset == 'openai-compatible' %}selected{% endif %}>OpenAI Compatible</option>
-            <option value="auto" {% if state.form_state.provider_preset == 'auto' %}selected{% endif %}>Auto (读环境变量)</option>
-            <option value="mock" {% if state.form_state.provider_preset == 'mock' %}selected{% endif %}>Mock</option>
-          </select>
-        </div>
-
-        <div class="two-col">
-          <div class="field">
-            <label for="api_key">API Key</label>
-            <input id="api_key" name="api_key" type="password" placeholder="可临时粘贴，不写入磁盘">
-          </div>
-          <div class="field">
-            <label for="model">模型</label>
-            <input id="model" name="model" type="text" value="{{ state.form_state.model }}">
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="base_url">Base URL</label>
-          <input id="base_url" name="base_url" type="text" value="{{ state.form_state.base_url }}">
-        </div>
-
-        <div class="three-col">
-          <div class="field">
-            <label for="summary_model">摘要模型</label>
-            <input id="summary_model" name="summary_model" type="text" placeholder="默认沿用主模型" value="{{ state.form_state.summary_model }}">
-          </div>
-          <div class="field">
-            <label for="translation_model">翻译模型</label>
-            <input id="translation_model" name="translation_model" type="text" placeholder="默认沿用主模型" value="{{ state.form_state.translation_model }}">
-          </div>
-          <div class="field">
-            <label for="review_model">校对模型</label>
-            <input id="review_model" name="review_model" type="text" placeholder="默认沿用主模型" value="{{ state.form_state.review_model }}">
-          </div>
-        </div>
-
-        <div class="three-col">
-          <div class="field">
-            <label for="max_batch_chars">单批字符数</label>
-            <input id="max_batch_chars" name="max_batch_chars" type="number" min="300" step="100" value="{{ state.form_state.max_batch_chars }}">
-          </div>
-          <div class="field">
-            <label for="max_batch_segments">单批片段数</label>
-            <input id="max_batch_segments" name="max_batch_segments" type="number" min="1" step="1" value="{{ state.form_state.max_batch_segments }}">
-          </div>
-          <div class="field">
-            <label for="translation_workers">翻译并发数</label>
-            <input id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="{{ state.form_state.translation_workers }}">
-          </div>
-        </div>
-
-        <div class="three-col">
-          <div class="field">
-            <label for="review_workers">校对并发数</label>
-            <input id="review_workers" name="review_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="{{ state.form_state.review_workers }}">
-          </div>
-          <div class="field">
-            <label for="reference_workers">参考并发数</label>
-            <input id="reference_workers" name="reference_workers" type="number" min="0" step="1" placeholder="沿用翻译并发" value="{{ state.form_state.reference_workers }}">
-          </div>
-          <div class="field">
-            <label for="max_review_retries">最大重试次数</label>
-            <input id="max_review_retries" name="max_review_retries" type="number" min="0" step="1" value="{{ state.form_state.max_review_retries }}">
-          </div>
-        </div>
-
-        <div class="three-col">
-          <div class="field">
-            <label for="min_review_score">最低校对分</label>
-            <input id="min_review_score" name="min_review_score" type="number" min="1" max="100" step="1" value="{{ state.form_state.min_review_score }}">
-          </div>
-          <div class="field">
-            <label for="recent_summary_limit">保留最近摘要数</label>
-            <input id="recent_summary_limit" name="recent_summary_limit" type="number" min="1" step="1" value="{{ state.form_state.recent_summary_limit }}">
-          </div>
-        </div>
-
-        <div class="field">
-          <label for="title_suffix">输出标题后缀</label>
-          <input id="title_suffix" name="title_suffix" type="text" value="{{ state.form_state.title_suffix }}">
         </div>
 
         <label class="checkbox">
@@ -215,7 +109,7 @@
             <span class="stat-label">重试批次</span>
             <strong id="stat-retries">0</strong>
           </div>
-          <div class="stat">
+          <div class="stat stat-current">
             <span class="stat-label">当前文档</span>
             <strong id="stat-current-doc">尚未开始</strong>
           </div>
@@ -234,19 +128,7 @@
             <dt>输出文件</dt>
             <dd id="meta-output">-</dd>
           </div>
-          <div>
-            <dt>进度文件</dt>
-            <dd id="meta-progress">-</dd>
-          </div>
-          <div>
-            <dt>模型</dt>
-            <dd id="meta-model">-</dd>
-          </div>
         </dl>
-
-        <div class="actions">
-          <a class="ghost disabled" id="download-link" href="#" aria-disabled="true">下载输出 EPUB</a>
-        </div>
 
         <div class="log-wrap">
           <div class="log-head">
@@ -259,10 +141,18 @@
   </main>
 
   <script>
-    const providerDefaults = {{ provider_defaults|tojson }};
-    const providerField = document.getElementById("provider_preset");
-    const modelField = document.getElementById("model");
-    const baseUrlField = document.getElementById("base_url");
+    function toggleTheme() {
+      const root = document.documentElement;
+      root.classList.toggle("dark");
+      localStorage.setItem("epubtsuyaku-theme", root.classList.contains("dark") ? "dark" : "");
+    }
+    (function initTheme() {
+      const saved = localStorage.getItem("epubtsuyaku-theme");
+      if (saved === "dark" || (!saved && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        document.documentElement.classList.add("dark");
+      }
+    })();
+
     const statusTitle = document.getElementById("status-title");
     const statReference = document.getElementById("stat-reference");
     const statSummary = document.getElementById("stat-summary");
@@ -274,34 +164,7 @@
     const progressBar = document.getElementById("progress-bar");
     const metaInput = document.getElementById("meta-input");
     const metaOutput = document.getElementById("meta-output");
-    const metaProgress = document.getElementById("meta-progress");
-    const metaModel = document.getElementById("meta-model");
     const logOutput = document.getElementById("log-output");
-    const downloadLink = document.getElementById("download-link");
-
-    function applyPreset() {
-      const value = providerField.value;
-      if (value === "deepseek") {
-        if (!modelField.value || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {
-          modelField.value = providerDefaults.deepseek_model;
-        }
-        if (!baseUrlField.value || baseUrlField.value === providerDefaults.aliyun_base_url) {
-          baseUrlField.value = providerDefaults.deepseek_base_url;
-        }
-      } else if (value === "aliyun") {
-        if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.openai_model) {
-          modelField.value = providerDefaults.aliyun_model;
-        }
-        baseUrlField.value = providerDefaults.aliyun_base_url;
-      } else if (value === "openai-compatible") {
-        if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model) {
-          modelField.value = providerDefaults.openai_model;
-        }
-      } else if (value === "mock") {
-        modelField.value = "mock-model";
-        baseUrlField.value = "";
-      }
-    }
 
     function updateStatus(snapshot) {
       const job = snapshot.job;
@@ -317,12 +180,7 @@
         progressBar.style.width = "0%";
         metaInput.textContent = "-";
         metaOutput.textContent = "-";
-        metaProgress.textContent = "-";
-        metaModel.textContent = "-";
         logOutput.textContent = "页面已就绪。";
-        downloadLink.classList.add("disabled");
-        downloadLink.setAttribute("aria-disabled", "true");
-        downloadLink.href = "#";
         return;
       }
 
@@ -365,38 +223,24 @@
       progressBar.style.width = `${percent}%`;
       metaInput.textContent = job.input_path || "-";
       metaOutput.textContent = job.output_path || "-";
-      metaProgress.textContent = job.progress_path || "-";
-      metaModel.textContent = job.model || "-";
       const nextLogText = (job.logs || []).join("\n") || "暂无日志。";
       if (logOutput.textContent !== nextLogText) {
         logOutput.textContent = nextLogText;
         logOutput.scrollTop = logOutput.scrollHeight;
       }
-
-      if (job.download_url) {
-        downloadLink.classList.remove("disabled");
-        downloadLink.removeAttribute("aria-disabled");
-        downloadLink.href = job.download_url;
-      } else {
-        downloadLink.classList.add("disabled");
-        downloadLink.setAttribute("aria-disabled", "true");
-        downloadLink.href = "#";
-      }
     }
 
     async function pollStatus() {
       try {
-        const response = await fetch("{{ url_for('api_status') }}", { cache: "no-store" });
+        const response = await fetch("/api/status", { cache: "no-store" });
         const snapshot = await response.json();
         updateStatus(snapshot);
       } catch (error) {
-        logOutput.textContent = `读取状态失败：${error}`;
+        logOutput.textContent = `获取状态失败：${error}`;
         logOutput.scrollTop = logOutput.scrollHeight;
       }
     }
 
-    providerField.addEventListener("change", applyPreset);
-    applyPreset();
     pollStatus();
     setInterval(pollStatus, 2000);
   </script>
