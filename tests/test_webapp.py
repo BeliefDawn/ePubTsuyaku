@@ -359,6 +359,48 @@ class WebAppTests(unittest.TestCase):
             self.assertEqual(second_snapshot["job"]["processed_count"], 0)
             self.assertEqual(second_snapshot["job"]["skipped_count"], 1)
 
+    def test_reset_progress_checkbox_forces_fresh_run(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "epubOutput").mkdir()
+            sample_path = root / "demo.epub"
+            build_sample_epub(sample_path)
+
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            def start_with_reset():
+                response = client.post(
+                    "/start",
+                    data={
+                        "existing_file": str(sample_path),
+                        "source_language": "日语",
+                        "target_language": "中文",
+                        "provider_preset": "mock",
+                        "model": "mock-model",
+                        "translation_workers": "1",
+                        "max_batch_chars": "800",
+                        "max_batch_segments": "16",
+                        "max_review_retries": "0",
+                        "min_review_score": "90",
+                        "recent_summary_limit": "3",
+                        "title_suffix": "（中文译本）",
+                        "reset_progress": "on",
+                    },
+                    follow_redirects=True,
+                )
+                self.assertEqual(response.status_code, 200)
+                return self._wait_for_job_completion(client)
+
+            first_snapshot = start_with_reset()
+            self.assertEqual(first_snapshot["job"]["status"], "completed")
+            self.assertEqual(first_snapshot["job"]["skipped_count"], 0)
+
+            second_snapshot = start_with_reset()
+            self.assertEqual(second_snapshot["job"]["status"], "completed")
+            self.assertEqual(second_snapshot["job"]["processed_count"], 1)
+            self.assertEqual(second_snapshot["job"]["skipped_count"], 0)
+
     def test_web_ui_auto_resumes_retryable_failures(self):
         shared = {"failed_once": False}
 

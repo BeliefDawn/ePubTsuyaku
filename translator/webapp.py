@@ -622,7 +622,7 @@ class JobManager:
             max_review_retries = int(form_data.get("max_review_retries") or 2)
             min_review_score = int(form_data.get("min_review_score") or 85)
             recent_summary_limit = int(form_data.get("recent_summary_limit") or 5)
-            reset_progress = form_data.get("reset_progress") == "on"
+            reset_progress = bool(form_data.get("reset_progress"))
 
             config = PipelineConfig(
                 input_path=input_path,
