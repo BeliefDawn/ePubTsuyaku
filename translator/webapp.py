@@ -140,7 +140,26 @@ def _safe_upload_name(original_name: str, content_hash: str) -> str:
     return f"{safe_stem}.{content_hash[:12]}{suffix}"
 
 
-def discover_epub_files(project_root: Path, book_dirs: str = "") -> List[Dict[str, str]]:
+def _sanitize_target_suffix(target_language: str) -> str:
+    return _sanitize_filename_part(target_language or "中文")
+
+
+def _epub_has_translated_sibling(path: Path, target_language: str) -> bool:
+    suffix = _sanitize_target_suffix(target_language)
+    return (path.parent / f"{path.stem}.{suffix}.epub").exists()
+
+
+def _epub_is_translated_output(path: Path, target_language: str) -> bool:
+    suffix = _sanitize_target_suffix(target_language)
+    return path.name.lower().endswith(f".{suffix}.epub".lower())
+
+
+def discover_epub_files(
+    project_root: Path,
+    book_dirs: str = "",
+    target_language: str = "中文",
+    only_untranslated: bool = True,
+) -> List[Dict[str, str]]:
     seen = set()
     result: List[Dict[str, str]] = []
     excluded = {".git", "__pycache__", "epubOutput", ".webui"}
@@ -158,6 +177,11 @@ def discover_epub_files(project_root: Path, book_dirs: str = "") -> List[Dict[st
         for path in sorted(root.rglob("*.epub")):
             if any(part in excluded for part in path.parts):
                 continue
+            translated = _epub_is_translated_output(path, target_language) or _epub_has_translated_sibling(
+                path, target_language
+            )
+            if only_untranslated and translated:
+                continue
             resolved = str(path.resolve())
             if resolved in seen:
                 continue
@@ -171,6 +195,7 @@ def discover_epub_files(project_root: Path, book_dirs: str = "") -> List[Dict[st
                     "path": resolved,
                     "label": label,
                     "name": path.name,
+                    "translated": translated,
                 }
             )
     return result
@@ -340,16 +365,25 @@ class JobManager:
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
-            files = discover_epub_files(self.project_root, self._settings.get("book_dirs") or "")
+            book_dirs = self._settings.get("book_dirs") or ""
+            target_language = self._settings.get("target_language") or "中文"
+            all_files = discover_epub_files(
+                self.project_root, book_dirs, target_language, only_untranslated=False
+            )
+            untranslated_files = discover_epub_files(
+                self.project_root, book_dirs, target_language, only_untranslated=True
+            )
             if self._current_job is None:
                 return {
                     "job": None,
-                    "available_files": files,
+                    "available_files": all_files,
+                    "available_files_untranslated": untranslated_files,
                     "form_state": dict(self._settings),
                 }
             return {
                 "job": self._current_job.to_public_dict(),
-                "available_files": files,
+                "available_files": all_files,
+                "available_files_untranslated": untranslated_files,
                 "form_state": dict(self._settings),
             }
 

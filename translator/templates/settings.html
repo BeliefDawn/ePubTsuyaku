@@ -234,7 +234,9 @@
         if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {
           modelField.value = providerDefaults.sakura_model;
         }
-        baseUrlField.value = providerDefaults.sakura_base_url;
+        if (!baseUrlField.value || baseUrlField.value === providerDefaults.deepseek_base_url || baseUrlField.value === providerDefaults.aliyun_base_url) {
+          baseUrlField.value = providerDefaults.sakura_base_url;
+        }
       } else if (value === "deepseek") {
         if (!modelField.value || modelField.value === providerDefaults.aliyun_model || modelField.value === providerDefaults.openai_model) {
           modelField.value = providerDefaults.deepseek_model;
@@ -246,7 +248,9 @@
         if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.openai_model) {
           modelField.value = providerDefaults.aliyun_model;
         }
-        baseUrlField.value = providerDefaults.aliyun_base_url;
+        if (!baseUrlField.value || baseUrlField.value === providerDefaults.deepseek_base_url || baseUrlField.value === providerDefaults.sakura_base_url) {
+          baseUrlField.value = providerDefaults.aliyun_base_url;
+        }
       } else if (value === "openai-compatible") {
         if (!modelField.value || modelField.value === providerDefaults.deepseek_model || modelField.value === providerDefaults.aliyun_model) {
           modelField.value = providerDefaults.openai_model;

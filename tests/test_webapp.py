@@ -163,6 +163,23 @@ class WebAppTests(unittest.TestCase):
             self.assertTrue(any(path.endswith("external.epub") for path in paths))
             self.assertTrue(any(path.endswith("nested.epub") for path in paths))
 
+    def test_discover_epub_files_filters_to_untranslated(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            build_sample_epub(root / "done.epub")
+            build_sample_epub(root / "done.中文.epub")
+            build_sample_epub(root / "todo.epub")
+
+            untranslated = discover_epub_files(root, target_language="中文", only_untranslated=True)
+            paths = [item["path"] for item in untranslated]
+            self.assertIn(str((root / "todo.epub").resolve()), paths)
+            self.assertNotIn(str((root / "done.epub").resolve()), paths)
+            self.assertNotIn(str((root / "done.中文.epub").resolve()), paths)
+
+            all_files = discover_epub_files(root, target_language="中文", only_untranslated=False)
+            self.assertEqual(len([item for item in all_files if not item["translated"]]), 1)
+            self.assertEqual(len([item for item in all_files if item["translated"]]), 2)
+
     def test_web_ui_can_start_mock_job(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

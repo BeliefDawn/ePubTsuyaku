@@ -41,10 +41,14 @@
         <div class="field">
           <select id="existing_file" name="existing_file">
             <option value="">请选择要翻译的文档。</option>
-            {% for item in state.available_files %}
+            {% for item in state.available_files_untranslated %}
               <option value="{{ item.path }}" {% if state.form_state.existing_file == item.path %}selected{% endif %}>{{ item.label }}</option>
             {% endfor %}
           </select>
+          <label class="checkbox inline-check">
+            <input id="only-untranslated" name="only_untranslated" type="checkbox" checked>
+            <span>仅显示未翻译</span>
+          </label>
         </div>
 
         <div class="ref-collapse">
@@ -166,7 +170,28 @@
     const metaOutput = document.getElementById("meta-output");
     const logOutput = document.getElementById("log-output");
     const startBtn = document.getElementById("start-btn");
+    const mainSelect = document.getElementById("existing_file");
+    const onlyUntranslatedToggle = document.getElementById("only-untranslated");
+    let lastSnapshot = null;
     let startBtnStopping = false;
+
+    function renderAvailableFiles(snapshot) {
+      if (!mainSelect || !snapshot) return;
+      const onlyUntranslated = onlyUntranslatedToggle ? onlyUntranslatedToggle.checked : true;
+      const files = onlyUntranslated
+        ? (snapshot.available_files_untranslated || [])
+        : (snapshot.available_files || []);
+      const selected = mainSelect.value;
+      const selectedStillValid = files.some(function (item) { return item.path === selected; });
+      mainSelect.innerHTML = '<option value="">请选择要翻译的文档。</option>' + files.map(function (item) {
+        const selectedAttr = item.path === selected ? " selected" : "";
+        const label = String(item.label).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return `<option value="${item.path}"${selectedAttr}>${label}</option>`;
+      }).join("");
+      if (selected && selectedStillValid) {
+        mainSelect.value = selected;
+      }
+    }
 
     function setStartButton(running) {
       startBtnStopping = running;
@@ -191,7 +216,15 @@
       });
     }
 
+    if (onlyUntranslatedToggle) {
+      onlyUntranslatedToggle.addEventListener("change", function () {
+        renderAvailableFiles(lastSnapshot);
+      });
+    }
+
     function updateStatus(snapshot) {
+      lastSnapshot = snapshot;
+      renderAvailableFiles(snapshot);
       const job = snapshot.job;
       if (!job) {
         setStartButton(false);
