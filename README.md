@@ -285,7 +285,6 @@ ePubTsuyaku/
 │   ├── test_pipeline.py
 │   ├── test_state.py
 │   └── test_webapp.py
-├── epubTemplates/
 └── README.md
 ```
 
