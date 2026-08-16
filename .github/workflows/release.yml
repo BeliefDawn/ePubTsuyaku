@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (arm64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python and dependencies
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+          uv pip install -r requirements.txt pyinstaller
+
+      - name: Build .app bundle
+        run: uv run pyinstaller --noconfirm --clean translate_gui.spec
+
+      - name: Ad-hoc codesign
+        run: codesign --force --deep -s - "dist/EpubTsuyaku.app"
+
+      - name: Package .dmg
+        run: |
+          hdiutil create \
+            -volname "ePubTsuyaku" \
+            -srcfolder "dist/EpubTsuyaku.app" \
+            -ov -format UDZO \
+            "dist/ePubTsuyaku-${GITHUB_REF_NAME}-macos-arm64.dmg"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64
+          path: dist/*.dmg
+
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Python and dependencies
+        run: |
+          uv python install 3.12
+          uv venv --python 3.12
+          uv pip install -r requirements.txt pyinstaller
+
+      - name: Build .exe
+        run: uv run pyinstaller --noconfirm --clean translate_gui.spec
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: dist/EpubTsuyaku.exe
+
+  release:
+    name: Create release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            artifacts/macos-arm64/*.dmg \
+            artifacts/windows-x64/*.exe \
+            --generate-notes

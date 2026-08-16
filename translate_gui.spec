@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -28,17 +29,45 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name="EpubTsuyaku",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=False,
-    console=False,
-    disable_windowed_traceback=False,
-)
+if sys.platform == "darwin":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        exclude_binaries=True,
+        name="EpubTsuyaku",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=False,
+        name="EpubTsuyaku",
+    )
+    app = BUNDLE(
+        coll,
+        name="EpubTsuyaku.app",
+        icon=None,
+        bundle_identifier="com.epubtsuyaku.app",
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name="EpubTsuyaku",
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=False,
+        console=False,
+        disable_windowed_traceback=False,
+    )
