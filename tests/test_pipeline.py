@@ -288,7 +288,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 min_review_score=90,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             self.assertEqual(shared["translate_calls"], 2)
@@ -323,7 +323,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 result = run_translation_pipeline(config)
 
             self.assertTrue(output_path.exists())
@@ -359,7 +359,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 result = run_translation_pipeline(config)
 
             self.assertTrue(output_path.exists())
@@ -396,7 +396,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             )
 
             events = []
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FailingSummaryClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FailingSummaryClient()):
                 run_translation_pipeline(config, status_callback=lambda body: events.append(body))
 
             degraded = [e for e in events if e["event"] == "assistant_degraded"]
@@ -441,7 +441,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             cancel_event = threading.Event()
             cancel_event.set()
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 with self.assertRaises(JobCancelledError):
                     run_translation_pipeline_with_retries(config, cancel_event=cancel_event)
 
@@ -497,7 +497,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             progress = load_progress(progress_path)
@@ -569,7 +569,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 max_batch_segments=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             self.assertGreaterEqual(len(shared["summary_inputs"]), 2)
@@ -629,7 +629,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 max_batch_segments=3,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 result = run_translation_pipeline(config)
 
             self.assertEqual(result["processed_count"], 1)
@@ -687,7 +687,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             self.assertEqual(shared["second_doc_glossary"], [])
@@ -742,7 +742,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             )
 
             first_shared = {"translated_inputs": []}
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FailingClient(first_shared)):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FailingClient(first_shared)):
                 with self.assertRaisesRegex(RuntimeError, "boom on second paragraph"):
                     run_translation_pipeline(config)
 
@@ -754,7 +754,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertNotIn("batch_0003", translated_batch_keys)
 
             second_shared = {"translated_inputs": []}
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: StableClient(second_shared)):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: StableClient(second_shared)):
                 result = run_translation_pipeline(config)
 
             self.assertEqual(result["processed_count"], 1)
@@ -802,7 +802,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 reset_progress=True,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: CountingClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: CountingClient()):
                 first_result = run_translation_pipeline(base_config)
 
             self.assertEqual(first_result["processed_count"], 1)
@@ -823,7 +823,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
                 max_batch_segments=1,
             )
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: CountingClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: CountingClient()):
                 second_result = run_translation_pipeline(resume_config)
 
             self.assertEqual(second_result["processed_count"], 0)
@@ -885,7 +885,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 max_batch_segments=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: PipelinedClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: PipelinedClient()):
                 result = run_translation_pipeline(config)
 
             self.assertEqual(result["processed_count"], 1)
@@ -948,7 +948,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 reference_workers=2,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: ParallelReferenceClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: ParallelReferenceClient()):
                 result = run_translation_pipeline(config)
 
             self.assertEqual(result["reference_completed_count"], 2)
@@ -1032,7 +1032,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 reset_progress=True,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FlakyClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FlakyClient()):
                 result = run_translation_pipeline_with_retries(config)
 
             self.assertEqual(result["processed_count"], 1)
@@ -1159,7 +1159,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 translation_workers=1,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             self.assertTrue(shared["summary_reference_profile"])
@@ -1237,7 +1237,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 reference_input_path=reference_path,
             )
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FakeLLMClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FakeLLMClient()):
                 run_translation_pipeline(config)
 
             self.assertEqual(shared["summary_reference_profile"]["characters"][0]["name"], "小鸟游")
@@ -1290,7 +1290,7 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             first_shared = {"reference_calls": 0, "summary_calls": 0, "translate_calls": 0}
             with patch(
-                "translator.pipeline._build_llm_client",
+                "translator.pipeline.build_llm_client",
                 side_effect=lambda *_: FakeLLMClient(first_shared, "A"),
             ):
                 run_translation_pipeline(
@@ -1309,7 +1309,7 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             second_shared = {"reference_calls": 0, "summary_calls": 0, "translate_calls": 0}
             with patch(
-                "translator.pipeline._build_llm_client",
+                "translator.pipeline.build_llm_client",
                 side_effect=lambda *_: FakeLLMClient(second_shared, "B"),
             ):
                 run_translation_pipeline(
@@ -1395,7 +1395,7 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             first_shared = {"reference_inputs": []}
             first_events = []
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FailingClient(first_shared)):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FailingClient(first_shared)):
                 run_translation_pipeline(config, status_callback=lambda body: first_events.append(body))
 
             degraded = [e for e in first_events if e["event"] == "assistant_degraded"]
@@ -1405,7 +1405,7 @@ class PipelineIntegrationTests(unittest.TestCase):
             self.assertEqual(progress["reference_documents"]["chapter2.xhtml"]["status"], "done")
 
             second_shared = {"reference_inputs": []}
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: StableClient(second_shared)):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: StableClient(second_shared)):
                 run_translation_pipeline(config)
 
             self.assertEqual(second_shared["reference_inputs"], [])

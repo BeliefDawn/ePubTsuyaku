@@ -461,7 +461,7 @@ class WebAppTests(unittest.TestCase):
             app = create_app(project_root=root)
             client = app.test_client()
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: SlowClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: SlowClient()):
                 client.post(
                     "/start",
                     data={
@@ -648,7 +648,7 @@ class WebAppTests(unittest.TestCase):
             app = create_app(project_root=root)
             client = app.test_client()
 
-            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FlakyClient()):
+            with patch("translator.pipeline.build_llm_client", side_effect=lambda *_: FlakyClient()):
                 response = client.post(
                     "/start",
                     data={

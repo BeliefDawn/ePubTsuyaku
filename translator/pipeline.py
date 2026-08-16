@@ -12,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional
 import ebooklib
 from ebooklib import epub
 
+from .clients import build_llm_client
 from .config import PipelineConfig
 from .epub_utils import (
     apply_translations,
@@ -22,7 +23,7 @@ from .epub_utils import (
     prepare_document,
     set_item_content,
 )
-from .llm import MockLLMClient, OpenAICompatibleLLMClient, SakuraLLMClient
+from .llm import TranslationHistory
 from .state import (
     create_progress_document,
     empty_reference_patch,
@@ -145,40 +146,6 @@ class ReferenceContext:
     fingerprint: str
     book: Any
     book_metadata: Dict[str, str]
-
-
-def _build_llm_client(config: PipelineConfig):
-    if config.provider == "mock":
-        return MockLLMClient()
-    if not config.api_key:
-        raise RuntimeError("缺少 API Key。")
-    if config.provider == "sakura":
-        assistant = None
-        if config.assistant_enabled and config.assistant_base_url:
-            assistant_model = config.assistant_model or config.model
-            assistant = OpenAICompatibleLLMClient(
-                api_key=config.assistant_api_key or "sk-no-key-required",
-                base_url=config.assistant_base_url,
-                model=assistant_model,
-                summary_model=assistant_model,
-                translation_model=assistant_model,
-                review_model=assistant_model,
-                no_thinking_prompt=True,
-            )
-        return SakuraLLMClient(
-            api_key=config.api_key,
-            base_url=config.base_url,
-            model=config.model,
-            assistant_client=assistant,
-        )
-    return OpenAICompatibleLLMClient(
-        api_key=config.api_key,
-        base_url=config.base_url,
-        model=config.model,
-        summary_model=config.summary_model,
-        translation_model=config.translation_model,
-        review_model=config.review_model,
-    )
 
 
 def _compute_file_sha1(path: Path) -> str:
@@ -525,7 +492,7 @@ def _translate_missing_toc_titles(
             ordered_titles.append(original)
 
     try:
-        client = _build_llm_client(config)
+        client = build_llm_client(config)
         translated = client.translate_titles(ordered_titles)
     except Exception:
         return title_lookup
@@ -850,7 +817,7 @@ def _extract_reference_document_worker(
         log(f"[reference] {prepared.index}. {plan.file_name} ({len(plan.segments)} segments)")
         reference_client = getattr(thread_local, "reference_client", None)
         if reference_client is None:
-            reference_client = _build_llm_client(config)
+            reference_client = build_llm_client(config)
             thread_local.reference_client = reference_client
         patch = _extract_reference_document_patch(
             config=config,
@@ -1187,7 +1154,7 @@ def run_summary_phase(
 ) -> Dict[str, Any]:
     total_document_count = len(prepared_documents)
     summary_state = new_story_state(book_metadata)
-    summary_client = _build_llm_client(config)
+    summary_client = build_llm_client(config)
     summary_completed_count = 0
 
     progress["summary_phase"]["status"] = "running"
@@ -1381,10 +1348,14 @@ def _apply_stored_document_translation(prepared: PreparedDocument, progress: Dic
     _finalize_translated_document(prepared, progress)
 
 
-def _get_thread_local_llm_client(config: PipelineConfig, thread_local: threading.local):
+def _get_thread_local_llm_client(
+    config: PipelineConfig,
+    thread_local: threading.local,
+    translation_history: Optional[TranslationHistory] = None,
+):
     llm_client = getattr(thread_local, "llm_client", None)
     if llm_client is None:
-        llm_client = _build_llm_client(config)
+        llm_client = build_llm_client(config, translation_history)
         thread_local.llm_client = llm_client
     return llm_client
 
@@ -1404,10 +1375,13 @@ def _translate_batch_once_worker(
     batch_started_callback: Callable[[PreparedDocument, int], None],
     batch_finished_callback: Callable[[], None],
     thread_local: threading.local,
+    translation_history: Optional[TranslationHistory],
 ) -> Dict[str, Any]:
     batch_started_callback(prepared, batch_index)
     try:
-        llm_client = _get_thread_local_llm_client(config, thread_local)
+        llm_client = _get_thread_local_llm_client(
+            config, thread_local, translation_history=translation_history
+        )
         batch_translation = llm_client.translate(
             book_metadata=book_metadata,
             story_state=prompt_state,
@@ -1445,8 +1419,11 @@ def _review_batch_worker(
     thread_local: threading.local,
     log: Callable[[str], None],
     emit: Callable[[str], None],
+    translation_history: Optional[TranslationHistory],
 ) -> Dict[str, Any]:
-    llm_client = _get_thread_local_llm_client(config, thread_local)
+    llm_client = _get_thread_local_llm_client(
+        config, thread_local, translation_history=translation_history
+    )
     translated_segments = _translated_segments_as_list(batch, translations)
     try:
         review_payload = llm_client.review(
@@ -1510,6 +1487,7 @@ def run_parallel_translation_phase(
     active_workers = 0
     translation_thread_local = threading.local()
     review_thread_local = threading.local()
+    translation_history = TranslationHistory()
     review_workers = max(1, config.review_workers or config.translation_workers)
 
     def current_active_workers() -> int:
@@ -1694,6 +1672,7 @@ def run_parallel_translation_phase(
             batch_started_callback=batch_started_callback,
             batch_finished_callback=batch_finished_callback,
             thread_local=translation_thread_local,
+            translation_history=translation_history,
         )
         translation_futures[future] = prepared
 
@@ -1713,6 +1692,7 @@ def run_parallel_translation_phase(
             thread_local=review_thread_local,
             log=log,
             emit=emit,
+            translation_history=translation_history,
         )
         review_futures[future] = prepared
 

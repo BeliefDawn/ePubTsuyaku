@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -410,7 +411,26 @@ def _normalize_review_payload(payload: Dict[str, Any], expected_ids: List[str]) 
     }
 
 
+def pass_review_payload() -> Dict[str, Any]:
+    return {
+        "score": 100,
+        "needs_retry": False,
+        "major_issues": [],
+        "minor_issues": [],
+        "term_updates": [],
+        "style_updates": [],
+        "corrected_segments": {},
+        "retry_feedback": "",
+    }
+
+
 class BaseLLMClient:
+    @staticmethod
+    def _estimate_translation_max_tokens(segments: List[Dict[str, str]]) -> int:
+        total_chars = sum(len(segment.get("text", "")) for segment in segments)
+        total_segments = len(segments)
+        return min(8192, max(1536, total_chars * 3 + total_segments * 24))
+
     def extract_reference_patch(
         self,
         book_metadata: Dict[str, str],
@@ -489,12 +509,6 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         parsed = urlparse(base_url)
         hostname = (parsed.hostname or "").lower()
         return hostname == "api.deepseek.com"
-
-    @staticmethod
-    def _estimate_translation_max_tokens(segments: List[Dict[str, str]]) -> int:
-        total_chars = sum(len(segment.get("text", "")) for segment in segments)
-        total_segments = len(segments)
-        return min(8192, max(1536, total_chars * 3 + total_segments * 24))
 
     @staticmethod
     def _estimate_review_max_tokens(segments: List[Dict[str, str]]) -> int:
@@ -854,66 +868,21 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         return result
 
 
-class SakuraLLMClient(BaseLLMClient):
-    def __init__(
-        self,
-        api_key: str,
-        base_url: Optional[str],
-        model: str,
-        timeout: int = 300,
-        assistant_client: Optional[OpenAICompatibleLLMClient] = None,
-    ) -> None:
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.base_url = base_url
-        self.model = model
-        self.timeout = timeout
-        self._assistant = assistant_client
+class TranslationHistory:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
         self._history: List[str] = []
-        self._glossary: List[Dict[str, str]] = []
 
-    @staticmethod
-    def _estimate_translation_max_tokens(segments: List[Dict[str, str]]) -> int:
-        total_chars = sum(len(segment.get("text", "")) for segment in segments)
-        total_segments = len(segments)
-        return min(8192, max(1536, total_chars * 3 + total_segments * 24))
+    def read_history(self, limit: int) -> List[str]:
+        with self._lock:
+            return list(self._history[-limit:])
 
-    def _build_user_prompt(self, input_text: str) -> str:
-        parts: List[str] = []
-        if self._history:
-            history_lines = self._history[-SAKURA_HISTORY_LIMIT:]
-            parts.append("历史翻译：" + "\n".join(history_lines))
-        if self._glossary:
-            glossary_lines: List[str] = []
-            for item in self._glossary:
-                line = f"{item['source']}->{item['target']}"
-                note = item.get("note")
-                if note:
-                    line += f" #{note}"
-                glossary_lines.append(line)
-            parts.append("参考以下术语表（可为空，格式为src->dst #备注）：\n" + "\n".join(glossary_lines))
-        parts.append("根据以上术语表的对应关系和备注，结合历史剧情和上下文，将下面的文本从日文翻译成简体中文：")
-        parts.append(input_text)
-        return "\n\n".join(parts)
+    def set_history(self, lines: List[str]) -> None:
+        with self._lock:
+            self._history = list(lines)
 
-    def _request(self, user_prompt: str, max_tokens: Optional[int]) -> str:
-        request_kwargs: Dict[str, Any] = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": SAKURA_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": SAKURA_TEMPERATURE,
-            "top_p": SAKURA_TOP_P,
-            "timeout": self.timeout,
-        }
-        if max_tokens is not None:
-            request_kwargs["max_tokens"] = max_tokens
-        response = self.client.chat.completions.create(**request_kwargs)
-        choices = getattr(response, "choices", None)
-        if not choices:
-            raise RuntimeError("模型未返回内容（choices 为空）")
-        return _extract_message_text(choices[0].message.content)
 
+class AssistantDelegationMixin:
     def extract_reference_patch(
         self,
         book_metadata: Dict[str, str],
@@ -949,6 +918,89 @@ class SakuraLLMClient(BaseLLMClient):
                 reference_profile=reference_profile,
             )
         return empty_summary_patch()
+
+    def review(
+        self,
+        book_metadata: Dict[str, str],
+        story_state: Dict[str, Any],
+        source_segments: List[Dict[str, str]],
+        translated_segments: List[Dict[str, str]],
+        source_language: str,
+        target_language: str,
+        reference_profile: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if self._assistant is not None:
+            return self._assistant.review(
+                book_metadata=book_metadata,
+                story_state=story_state,
+                source_segments=source_segments,
+                translated_segments=translated_segments,
+                source_language=source_language,
+                target_language=target_language,
+                reference_profile=reference_profile,
+            )
+        return pass_review_payload()
+
+
+class SakuraLLMClient(AssistantDelegationMixin, BaseLLMClient):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: Optional[str],
+        model: str,
+        timeout: int = 300,
+        assistant_client: Optional[OpenAICompatibleLLMClient] = None,
+        translation_history: Optional[TranslationHistory] = None,
+    ) -> None:
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.base_url = base_url
+        self.model = model
+        self.timeout = timeout
+        self._assistant = assistant_client
+        self._translation_history = translation_history
+        self._history: List[str] = []
+        self._glossary: List[Dict[str, str]] = []
+
+    def _build_user_prompt(self, input_text: str) -> str:
+        parts: List[str] = []
+        history_lines = (
+            self._translation_history.read_history(SAKURA_HISTORY_LIMIT)
+            if self._translation_history is not None
+            else self._history[-SAKURA_HISTORY_LIMIT:]
+        )
+        if history_lines:
+            parts.append("历史翻译：" + "\n".join(history_lines))
+        if self._glossary:
+            glossary_lines: List[str] = []
+            for item in self._glossary:
+                line = f"{item['source']}->{item['target']}"
+                note = item.get("note")
+                if note:
+                    line += f" #{note}"
+                glossary_lines.append(line)
+            parts.append("参考以下术语表（可为空，格式为src->dst #备注）：\n" + "\n".join(glossary_lines))
+        parts.append("根据以上术语表的对应关系和备注，结合历史剧情和上下文，将下面的文本从日文翻译成简体中文：")
+        parts.append(input_text)
+        return "\n\n".join(parts)
+
+    def _request(self, user_prompt: str, max_tokens: Optional[int]) -> str:
+        request_kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SAKURA_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": SAKURA_TEMPERATURE,
+            "top_p": SAKURA_TOP_P,
+            "timeout": self.timeout,
+        }
+        if max_tokens is not None:
+            request_kwargs["max_tokens"] = max_tokens
+        response = self.client.chat.completions.create(**request_kwargs)
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("模型未返回内容（choices 为空）")
+        return _extract_message_text(choices[0].message.content)
 
     def translate(
         self,
@@ -989,39 +1041,12 @@ class SakuraLLMClient(BaseLLMClient):
         if missing_ids:
             raise RuntimeError(f"缺少片段译文: {', '.join(missing_ids)}")
 
-        self._history = [result[segment["id"]] for segment in segments]
+        translation_lines = [result[segment["id"]] for segment in segments]
+        if self._translation_history is not None:
+            self._translation_history.set_history(translation_lines)
+        else:
+            self._history = translation_lines
         return result
-
-    def review(
-        self,
-        book_metadata: Dict[str, str],
-        story_state: Dict[str, Any],
-        source_segments: List[Dict[str, str]],
-        translated_segments: List[Dict[str, str]],
-        source_language: str,
-        target_language: str,
-        reference_profile: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        if self._assistant is not None:
-            return self._assistant.review(
-                book_metadata=book_metadata,
-                story_state=story_state,
-                source_segments=source_segments,
-                translated_segments=translated_segments,
-                source_language=source_language,
-                target_language=target_language,
-                reference_profile=reference_profile,
-            )
-        return {
-            "score": 100,
-            "needs_retry": False,
-            "major_issues": [],
-            "minor_issues": [],
-            "term_updates": [],
-            "style_updates": [],
-            "corrected_segments": {},
-            "retry_feedback": "",
-        }
 
     def translate_titles(self, titles: List[str]) -> List[str]:
         if not titles:
@@ -1096,16 +1121,7 @@ class MockLLMClient(BaseLLMClient):
         target_language: str,
         reference_profile: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        return {
-            "score": 100,
-            "needs_retry": False,
-            "major_issues": [],
-            "minor_issues": [],
-            "term_updates": [],
-            "style_updates": [],
-            "corrected_segments": {},
-            "retry_feedback": "",
-        }
+        return pass_review_payload()
 
     def translate_titles(self, titles: List[str]) -> List[str]:
         return [f"[translated] {title}" for title in titles]

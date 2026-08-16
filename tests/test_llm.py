@@ -1,6 +1,15 @@
+import threading
 import unittest
 
-from translator.llm import MockLLMClient, OpenAICompatibleLLMClient, SakuraLLMClient, _extract_translation_map, _parse_json_from_text
+from translator.llm import (
+    MockLLMClient,
+    OpenAICompatibleLLMClient,
+    SakuraLLMClient,
+    TranslationHistory,
+    SAKURA_HISTORY_LIMIT,
+    _extract_translation_map,
+    _parse_json_from_text,
+)
 
 
 class TranslationPayloadTests(unittest.TestCase):
@@ -157,6 +166,111 @@ class TranslationPayloadTests(unittest.TestCase):
         )
 
         self.assertIn("浮き輪->浮力环 #泳具", captured["prompt"])
+
+    def test_sakura_shared_translation_context_reuses_history_across_clients(self):
+        shared = TranslationHistory()
+        client_a = SakuraLLMClient(
+            api_key="key",
+            base_url="http://localhost:8080/v1",
+            model="model",
+            translation_history=shared,
+        )
+        client_b = SakuraLLMClient(
+            api_key="key",
+            base_url="http://localhost:8080/v1",
+            model="model",
+            translation_history=shared,
+        )
+        captured = {}
+
+        client_a._request = lambda user_prompt, max_tokens: "前一批译文。"  # type: ignore[method-assign]
+
+        def fake_request_b(user_prompt, max_tokens):
+            captured["prompt"] = user_prompt
+            return "后一批译文。"
+
+        client_b._request = fake_request_b  # type: ignore[method-assign]
+
+        client_a.translate(
+            book_metadata={},
+            story_state={},
+            segments=[{"id": "seg_0001", "text": "前文。"}],
+            source_language="日语",
+            target_language="中文",
+        )
+        client_b.translate(
+            book_metadata={},
+            story_state={},
+            segments=[{"id": "seg_0002", "text": "后文。"}],
+            source_language="日语",
+            target_language="中文",
+        )
+
+        self.assertIn("前一批译文。", captured["prompt"])
+        self.assertEqual(shared.read_history(SAKURA_HISTORY_LIMIT), ["后一批译文。"])
+        self.assertEqual(client_a._history, [])
+        self.assertEqual(client_b._history, [])
+
+    def test_sakura_shared_translation_context_concurrent_read_write_is_safe(self):
+        shared = TranslationHistory()
+
+        def run_client(rounds: int) -> None:
+            client = SakuraLLMClient(
+                api_key="key",
+                base_url="http://localhost:8080/v1",
+                model="model",
+                translation_history=shared,
+            )
+            client._request = lambda user_prompt, max_tokens: "译文。"  # type: ignore[method-assign]
+            for i in range(rounds):
+                client.translate(
+                    book_metadata={},
+                    story_state={},
+                    segments=[{"id": f"seg_{i}", "text": f"文本{i}。"}],
+                    source_language="日语",
+                    target_language="中文",
+                )
+
+        threads = [threading.Thread(target=run_client, args=(20,)) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(shared.read_history(100)), 1)
+
+    def test_sakura_without_shared_context_keeps_private_history(self):
+        client_a = SakuraLLMClient(
+            api_key="key",
+            base_url="http://localhost:8080/v1",
+            model="model",
+        )
+        client_b = SakuraLLMClient(
+            api_key="key",
+            base_url="http://localhost:8080/v1",
+            model="model",
+        )
+
+        client_a._request = lambda user_prompt, max_tokens: "A译文。"  # type: ignore[method-assign]
+        client_b._request = lambda user_prompt, max_tokens: "B译文。"  # type: ignore[method-assign]
+
+        client_a.translate(
+            book_metadata={},
+            story_state={},
+            segments=[{"id": "seg_0001", "text": "A文。"}],
+            source_language="日语",
+            target_language="中文",
+        )
+        client_b.translate(
+            book_metadata={},
+            story_state={},
+            segments=[{"id": "seg_0002", "text": "B文。"}],
+            source_language="日语",
+            target_language="中文",
+        )
+
+        self.assertEqual(client_a._history, ["A译文。"])
+        self.assertEqual(client_b._history, ["B译文。"])
 
     def test_sakura_request_raises_retryable_error_on_empty_choices(self):
         client = SakuraLLMClient(
