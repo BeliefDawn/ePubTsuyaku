@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-
 ALIYUN_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 DEEPSEEK_BETA_BASE_URL = "https://api.deepseek.com/beta"
@@ -81,9 +80,9 @@ def resolve_provider_settings(
         return "mock", None, None, explicit_model or "mock-model"
 
     if provider == "sakura":
-        api_key = "sk-no-key-required"
+        api_key: Optional[str] = "sk-no-key-required"
         model = explicit_model or project_model("Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf")
-        base_url = explicit_base_url or project_base_url() or "http://localhost:8080/v1"
+        base_url: Optional[str] = explicit_base_url or project_base_url() or "http://localhost:8080/v1"
         return "sakura", api_key, base_url, model
 
     if api_key_env:

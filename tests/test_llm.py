@@ -2,11 +2,11 @@ import threading
 import unittest
 
 from translator.llm import (
+    SAKURA_HISTORY_LIMIT,
     MockLLMClient,
     OpenAICompatibleLLMClient,
     SakuraLLMClient,
     TranslationHistory,
-    SAKURA_HISTORY_LIMIT,
     _extract_translation_map,
     _parse_json_from_text,
 )

@@ -20,8 +20,8 @@ from .config import (
     ALIYUN_BASE_URL,
     DEEPSEEK_BASE_URL,
     LEGACY_PROJECT_API_KEY_ENV,
-    PipelineConfig,
     PROJECT_API_KEY_ENV,
+    PipelineConfig,
     first_env,
     resolve_provider_settings,
 )
@@ -155,7 +155,7 @@ def _epub_is_translated_output(path: Path, target_language: str) -> bool:
     return path.name.lower().endswith(f".{suffix}.epub".lower())
 
 
-def _resolve_book_dir(project_root: Path, book_dirs: str) -> Optional[Path]:
+def _resolve_book_dir(project_root: Path, book_dirs: str) -> Path:
     raw = (book_dirs or "").strip()
     if not raw:
         return project_root / "Library"
@@ -172,7 +172,7 @@ def discover_epub_files(
     only_untranslated: bool = True,
 ) -> List[Dict[str, str]]:
     seen = set()
-    result: List[Dict[str, str]] = []
+    result: List[Dict[str, Any]] = []
     excluded = {".git", "__pycache__", "epubOutput", ".webui"}
 
     roots = [project_root]
@@ -219,7 +219,7 @@ def _count_documents(input_path: Path) -> int:
 
 def _summarize_book(input_path: Path) -> Dict[str, Any]:
     book = epub.read_epub(str(input_path))
-    metadata = extract_book_metadata(book)
+    metadata: Dict[str, Any] = extract_book_metadata(book)
     metadata["document_count"] = len(list(iter_spine_documents(book)))
     return metadata
 

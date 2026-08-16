@@ -1,9 +1,6 @@
 import unittest
 
-from translator.epub_utils import apply_translations
-from translator.epub_utils import batch_segments
-from translator.epub_utils import extract_document_title
-from translator.epub_utils import prepare_document
+from translator.epub_utils import apply_translations, batch_segments, extract_document_title, prepare_document
 
 
 class BatchSegmentsTests(unittest.TestCase):

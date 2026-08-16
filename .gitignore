@@ -11,4 +11,6 @@ Library/
 progress.*.json
 /*.epub
 web_backup_*/
+PackReadme.md
+uv.lock
 

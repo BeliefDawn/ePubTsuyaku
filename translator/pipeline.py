@@ -17,30 +17,32 @@ from .config import PipelineConfig
 from .epub_utils import (
     apply_translations,
     batch_segments,
-    extract_document_title,
     extract_book_metadata,
+    extract_document_title,
     iter_spine_documents,
     prepare_document,
     set_item_content,
 )
 from .llm import TranslationHistory
-from .state import (
+from .progress import (
     create_progress_document,
-    empty_reference_patch,
-    empty_summary_patch,
-    get_reference_document_record,
     get_document_record,
+    get_reference_document_record,
     load_progress,
     make_batch_key,
+    save_progress,
+    upsert_document_record,
+    upsert_reference_document_record,
+)
+from .state import (
+    empty_reference_patch,
+    empty_summary_patch,
     merge_reference_profile,
     merge_story_state,
     new_reference_profile,
     new_story_state,
     reference_profile_for_prompt,
-    save_progress,
     story_state_for_prompt,
-    upsert_reference_document_record,
-    upsert_document_record,
 )
 
 DC_NAMESPACE = "http://purl.org/dc/elements/1.1/"
@@ -744,7 +746,7 @@ def _extract_reference_document_patch(
     base_reference_profile: Dict[str, Any],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
 ) -> Dict[str, Any]:
     if not segments:
         return empty_reference_patch()
@@ -799,7 +801,7 @@ def _extract_reference_document_worker(
     base_reference_profile: Dict[str, Any],
     thread_local: threading.local,
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     total_document_count: int,
 ) -> Dict[str, Any]:
     plan = prepared.plan
@@ -874,7 +876,7 @@ def _summarize_segments_resilient(
     reference_profile: Optional[Dict[str, Any]],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     depth: int = 0,
 ) -> Dict[str, Any]:
     prompt_state = story_state_for_prompt(base_story_state, config.recent_summary_limit)
@@ -944,7 +946,7 @@ def _summarize_document_patch(
     reference_profile: Optional[Dict[str, Any]],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
 ) -> Dict[str, Any]:
     if not segments:
         return empty_summary_patch()
@@ -993,7 +995,7 @@ def run_reference_phase(
     progress: Dict[str, Any],
     reference_book_metadata: Dict[str, str],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     reference_fingerprint: str,
     cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
@@ -1149,7 +1151,7 @@ def run_summary_phase(
     book_metadata: Dict[str, str],
     reference_profile: Optional[Dict[str, Any]],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, Any]:
     total_document_count = len(prepared_documents)
@@ -1418,7 +1420,7 @@ def _review_batch_worker(
     attempt: int,
     thread_local: threading.local,
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     translation_history: Optional[TranslationHistory],
 ) -> Dict[str, Any]:
     llm_client = _get_thread_local_llm_client(
@@ -1471,7 +1473,7 @@ def run_parallel_translation_phase(
     book_metadata: Dict[str, str],
     reference_profile: Optional[Dict[str, Any]],
     log: Callable[[str], None],
-    emit: Callable[[str], None],
+    emit: Callable[..., None],
     cancel_event: Optional[threading.Event] = None,
 ) -> Dict[str, int]:
     total_document_count = len(prepared_documents)
@@ -1565,7 +1567,6 @@ def run_parallel_translation_phase(
 
     def finalize_document(prepared: PreparedDocument, *, reused: bool) -> None:
         nonlocal processed_count, skipped_count, completed_count
-        record = prepared.record
         if reused:
             _apply_stored_document_translation(prepared, progress)
             skipped_count += 1
@@ -1900,7 +1901,9 @@ def run_translation_pipeline(
     reference_profile: Optional[Dict[str, Any]] = None
     if reference_context.enabled:
         _check_cancel(cancel_event)
-        reference_title = reference_context.book_metadata.get("title") or reference_context.input_path.name
+        reference_title = reference_context.book_metadata.get("title") or (
+            reference_context.input_path.name if reference_context.input_path else ""
+        )
         log(f"reference: {reference_title}")
         log(f"reference fingerprint: {reference_context.fingerprint}")
         reference_profile = run_reference_phase(

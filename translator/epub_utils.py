@@ -9,7 +9,6 @@ import ebooklib
 from bs4 import BeautifulSoup
 from bs4.element import Comment, Declaration, Doctype, NavigableString, ProcessingInstruction, Tag
 
-
 MIN_FALLBACK_TEXT_CHARS = 1000
 MIN_FALLBACK_SEGMENT_RATIO = 0.1
 
@@ -288,8 +287,10 @@ def batch_segments(
 
 
 def _preserve_whitespace(original: str, translated: str) -> str:
-    leading = re.match(r"^\s*", original).group(0)
-    trailing = re.search(r"\s*$", original).group(0)
+    leading_match = re.match(r"^\s*", original)
+    trailing_match = re.search(r"\s*$", original)
+    leading = leading_match.group(0) if leading_match else ""
+    trailing = trailing_match.group(0) if trailing_match else ""
     body = translated.strip()
     return f"{leading}{body}{trailing}" if body else original
 

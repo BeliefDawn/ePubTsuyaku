@@ -1,6 +1,6 @@
 ﻿import copy
-import threading
 import tempfile
+import threading
 import unittest
 import zipfile
 from pathlib import Path
@@ -10,8 +10,13 @@ from unittest.mock import patch
 from ebooklib import epub
 
 from translator.config import PipelineConfig
-from translator.pipeline import JobCancelledError, is_retryable_run_error, run_translation_pipeline, run_translation_pipeline_with_retries
-from translator.state import load_progress
+from translator.pipeline import (
+    JobCancelledError,
+    is_retryable_run_error,
+    run_translation_pipeline,
+    run_translation_pipeline_with_retries,
+)
+from translator.progress import load_progress
 
 
 def build_sample_epub(path: Path, chapters=None, *, title: str = "Demo Book", language: str = "ja") -> None:

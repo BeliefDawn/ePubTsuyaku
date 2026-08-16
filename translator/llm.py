@@ -18,7 +18,6 @@ from .prompts import (
 )
 from .state import empty_reference_patch, empty_summary_patch
 
-
 SAKURA_SYSTEM_PROMPT = (
     "你是一个视觉小说翻译模型，可以通顺地使用给定的术语表以指定的风格将日文翻译成简体中文，"
     "并联系上下文正确使用人称代词，注意不要混淆使役态和被动态的主语和宾语，"
@@ -883,6 +882,8 @@ class TranslationHistory:
 
 
 class AssistantDelegationMixin:
+    _assistant: Optional[OpenAICompatibleLLMClient] = None
+
     def extract_reference_patch(
         self,
         book_metadata: Dict[str, str],
@@ -1037,9 +1038,9 @@ class SakuraLLMClient(AssistantDelegationMixin, BaseLLMClient):
             missing_ids = {segment["id"] for segment in pending if not result.get(segment["id"])}
             pending = [segment for segment in pending if segment["id"] in missing_ids]
 
-        missing_ids = [segment["id"] for segment in segments if not result.get(segment["id"])]
-        if missing_ids:
-            raise RuntimeError(f"缺少片段译文: {', '.join(missing_ids)}")
+        missing = [segment["id"] for segment in segments if not result.get(segment["id"])]
+        if missing:
+            raise RuntimeError(f"缺少片段译文: {', '.join(missing)}")
 
         translation_lines = [result[segment["id"]] for segment in segments]
         if self._translation_history is not None:
