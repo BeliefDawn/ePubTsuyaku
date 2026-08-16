@@ -17,7 +17,12 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller build failed"
 }
 
-$exe = Join-Path $ProjectRoot "dist\EpubTsuyaku.exe"
+$tag = (git describe --tags --abbrev=0 2>$null)
+if (-not $tag) {
+    $tag = "local"
+}
+$exe = Join-Path $ProjectRoot "dist\ePubTsuyaku-$tag-windows-x64.exe"
+Move-Item -Path (Join-Path $ProjectRoot "dist\EpubTsuyaku.exe") -Destination $exe -Force
 if (Test-Path $exe) {
     $size = (Get-Item $exe).Length / 1MB
     Write-Host ""
