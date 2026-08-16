@@ -31,13 +31,25 @@ jobs:
       - name: Ad-hoc codesign
         run: codesign --force --deep -s - "dist/EpubTsuyaku.app"
 
+      - name: Stage DMG contents
+        run: |
+          mkdir -p "dist/dmg"
+          cp -R "dist/EpubTsuyaku.app" "dist/dmg/EpubTsuyaku.app"
+          ln -s /Applications "dist/dmg/Applications"
+
       - name: Package .dmg
         run: |
           hdiutil create \
             -volname "ePubTsuyaku" \
-            -srcfolder "dist/EpubTsuyaku.app" \
+            -srcfolder "dist/dmg" \
             -ov -format UDZO \
             "dist/ePubTsuyaku-${GITHUB_REF_NAME}-macos-arm64.dmg"
+
+      - name: Verify DMG contents
+        run: |
+          hdiutil attach "dist/ePubTsuyaku-${GITHUB_REF_NAME}-macos-arm64.dmg" -nobrowse
+          ls -la "/Volumes/ePubTsuyaku"
+          hdiutil detach "/Volumes/ePubTsuyaku"
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
