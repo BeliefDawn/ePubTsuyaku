@@ -68,6 +68,7 @@ RETRYABLE_RUN_ERROR_SNIPPETS = (
     "invalid control character",
     "缺少片段译文",
     "仍有未补齐的片段译文",
+    "模型未返回内容",
     "apiconnectionerror",
     "connection error",
     "read timeout",
@@ -776,6 +777,7 @@ def _extract_reference_document_patch(
     base_reference_profile: Dict[str, Any],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
+    emit: Callable[[str], None],
 ) -> Dict[str, Any]:
     if not segments:
         return empty_reference_patch()
@@ -787,12 +789,17 @@ def _extract_reference_document_patch(
     )
     if len(reference_batches) == 1:
         prompt_profile = reference_profile_for_prompt(base_reference_profile)
-        return reference_client.extract_reference_patch(
-            book_metadata=book_metadata,
-            reference_profile=prompt_profile,
-            segments=segments,
-            target_language=config.target_language,
-        )
+        try:
+            return reference_client.extract_reference_patch(
+                book_metadata=book_metadata,
+                reference_profile=prompt_profile,
+                segments=segments,
+                target_language=config.target_language,
+            )
+        except Exception as exc:
+            log(f"[assistant-skip] reference: {exc.__class__.__name__}: {exc}")
+            emit("assistant_degraded", phase="reference")
+            return empty_reference_patch()
 
     working_profile = copy.deepcopy(base_reference_profile)
     document_profile = new_reference_profile(book_metadata, config.target_language)
@@ -800,12 +807,17 @@ def _extract_reference_document_patch(
     for batch_index, batch in enumerate(reference_batches, start=1):
         log(f"  - reference chunk {batch_index}/{len(reference_batches)}")
         prompt_profile = reference_profile_for_prompt(working_profile)
-        chunk_patch = reference_client.extract_reference_patch(
-            book_metadata=book_metadata,
-            reference_profile=prompt_profile,
-            segments=batch,
-            target_language=config.target_language,
-        )
+        try:
+            chunk_patch = reference_client.extract_reference_patch(
+                book_metadata=book_metadata,
+                reference_profile=prompt_profile,
+                segments=batch,
+                target_language=config.target_language,
+            )
+        except Exception as exc:
+            log(f"[assistant-skip] reference chunk {batch_index}: {exc.__class__.__name__}: {exc}")
+            emit("assistant_degraded", phase="reference")
+            chunk_patch = empty_reference_patch()
         working_profile = merge_reference_profile(working_profile, chunk_patch)
         document_profile = merge_reference_profile(document_profile, chunk_patch)
 
@@ -847,6 +859,7 @@ def _extract_reference_document_worker(
             base_reference_profile=base_reference_profile,
             segments=plan.segments,
             log=log,
+            emit=emit,
         )
 
     return {
@@ -894,6 +907,7 @@ def _summarize_segments_resilient(
     reference_profile: Optional[Dict[str, Any]],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
+    emit: Callable[[str], None],
     depth: int = 0,
 ) -> Dict[str, Any]:
     prompt_state = story_state_for_prompt(base_story_state, config.recent_summary_limit)
@@ -909,11 +923,13 @@ def _summarize_segments_resilient(
     except Exception as exc:
         if not _is_structured_output_failure(exc) or len(segments) <= 1:
             log(f"[assistant-skip] summary {len(segments)} segments: {_exception_summary(exc)}")
+            emit("assistant_degraded", phase="summary")
             return empty_summary_patch()
 
         left_segments, right_segments = _split_segments_balanced(segments)
         if not right_segments:
             log(f"[assistant-skip] summary split failed: {_exception_summary(exc)}")
+            emit("assistant_degraded", phase="summary")
             return empty_summary_patch()
 
         indent = "  " * max(1, depth + 1)
@@ -930,6 +946,7 @@ def _summarize_segments_resilient(
             reference_profile=reference_profile,
             segments=left_segments,
             log=log,
+            emit=emit,
             depth=depth + 1,
         )
         mid_state = merge_story_state(base_story_state, left_patch, config.recent_summary_limit)
@@ -941,6 +958,7 @@ def _summarize_segments_resilient(
             reference_profile=reference_profile,
             segments=right_segments,
             log=log,
+            emit=emit,
             depth=depth + 1,
         )
         return _merge_summary_patches(
@@ -959,6 +977,7 @@ def _summarize_document_patch(
     reference_profile: Optional[Dict[str, Any]],
     segments: List[Dict[str, str]],
     log: Callable[[str], None],
+    emit: Callable[[str], None],
 ) -> Dict[str, Any]:
     if not segments:
         return empty_summary_patch()
@@ -977,6 +996,7 @@ def _summarize_document_patch(
             reference_profile=reference_profile,
             segments=segments,
             log=log,
+            emit=emit,
         )
 
     working_state = copy.deepcopy(base_story_state)
@@ -992,6 +1012,7 @@ def _summarize_document_patch(
             reference_profile=reference_profile,
             segments=batch,
             log=log,
+            emit=emit,
         )
         working_state = merge_story_state(working_state, chunk_patch, config.recent_summary_limit)
         document_state = merge_story_state(document_state, chunk_patch, config.recent_summary_limit)
@@ -1235,6 +1256,7 @@ def run_summary_phase(
                 base_story_state=summary_state,
                 reference_profile=reference_profile,
                 log=log,
+                emit=emit,
             )
 
         summary_state = merge_story_state(summary_state, patch, config.recent_summary_limit)
@@ -1422,6 +1444,7 @@ def _review_batch_worker(
     attempt: int,
     thread_local: threading.local,
     log: Callable[[str], None],
+    emit: Callable[[str], None],
 ) -> Dict[str, Any]:
     llm_client = _get_thread_local_llm_client(config, thread_local)
     translated_segments = _translated_segments_as_list(batch, translations)
@@ -1440,6 +1463,7 @@ def _review_batch_worker(
             f"[assistant-skip] {prepared.plan.file_name} batch {batch_index}: "
             f"{exc.__class__.__name__}: {exc}"
         )
+        emit("assistant_degraded", phase="review")
         review_payload = {
             "score": 100,
             "needs_retry": False,
@@ -1688,6 +1712,7 @@ def run_parallel_translation_phase(
             attempt=int(translation_result.get("attempt", 0) or 0),
             thread_local=review_thread_local,
             log=log,
+            emit=emit,
         )
         review_futures[future] = prepared
 

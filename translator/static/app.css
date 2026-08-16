@@ -409,6 +409,19 @@ select:focus {
   border-color: rgba(196, 90, 70, .28);
 }
 
+.stat.degraded {
+  background: var(--yellow-soft);
+  border-color: rgba(201, 154, 62, 0.45);
+}
+
+.stat.degraded .stat-label {
+  color: var(--yellow);
+}
+
+.stat.degraded strong {
+  color: var(--yellow);
+}
+
 .stat-current .stat-label {
   color: var(--accent-em);
 }

@@ -314,6 +314,9 @@ class JobState:
     current_segment_count: int = 0
     current_batch_index: int = 0
     current_batch_total: int = 0
+    assistant_degraded_reference: bool = False
+    assistant_degraded_summary: bool = False
+    assistant_degraded_review: bool = False
     last_error: str = ""
     result: Dict[str, Any] = field(default_factory=dict)
     book_metadata: Dict[str, Any] = field(default_factory=dict)
@@ -559,6 +562,15 @@ class JobManager:
 
             if event == "run_finished":
                 job.result = {key: value for key, value in payload.items() if key != "event"}
+
+            if event == "assistant_degraded":
+                phase = payload.get("phase", "")
+                if phase == "reference":
+                    job.assistant_degraded_reference = True
+                elif phase == "summary":
+                    job.assistant_degraded_summary = True
+                elif phase == "review":
+                    job.assistant_degraded_review = True
 
     def _path_label(self, path: Path) -> str:
         try:

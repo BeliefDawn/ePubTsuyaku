@@ -91,11 +91,11 @@
 
         <div class="stats" id="stats-grid">
           <div class="stat">
-            <span class="stat-label">参考提取</span>
+            <span class="stat-label" id="stat-reference-label">参考提取</span>
             <strong id="stat-reference">0 / 0</strong>
           </div>
           <div class="stat">
-            <span class="stat-label">摘要进度</span>
+            <span class="stat-label" id="stat-summary-label">摘要进度</span>
             <strong id="stat-summary">0 / 0</strong>
           </div>
           <div class="stat">
@@ -167,6 +167,8 @@
     const statusTitle = document.getElementById("status-title");
     const statReference = document.getElementById("stat-reference");
     const statSummary = document.getElementById("stat-summary");
+    const statReferenceLabel = document.getElementById("stat-reference-label");
+    const statSummaryLabel = document.getElementById("stat-summary-label");
     const statTranslationBatches = document.getElementById("stat-translation-batches");
     const statWorkers = document.getElementById("stat-workers");
     const statCompleted = document.getElementById("stat-completed");
@@ -207,6 +209,18 @@
       startBtn.disabled = false;
     }
 
+    function setCardDegraded(labelEl, valueEl, degraded, baseLabel) {
+      const card = valueEl.closest(".stat");
+      if (degraded) {
+        card.classList.add("degraded");
+        labelEl.textContent = baseLabel + " ·已降级";
+        valueEl.textContent = "已跳过";
+      } else {
+        card.classList.remove("degraded");
+        labelEl.textContent = baseLabel;
+      }
+    }
+
     if (startBtn) {
       startBtn.addEventListener("click", function (event) {
         if (startBtnStopping) {
@@ -235,6 +249,8 @@
       const job = snapshot.job;
       if (!job) {
         setStartButton(false);
+        setCardDegraded(statReferenceLabel, statReference, false, "参考提取");
+        setCardDegraded(statSummaryLabel, statSummary, false, "摘要进度");
         statusTitle.textContent = "等待启动";
         statReference.textContent = "0 / 0";
         statSummary.textContent = "0 / 0";
@@ -281,8 +297,14 @@
       }
 
       statusTitle.textContent = statusMap[job.status] || job.status;
-      statReference.textContent = `${referenceCompleted} / ${referenceTotal}`;
-      statSummary.textContent = `${summaryCompleted} / ${summaryTotal}`;
+      setCardDegraded(statReferenceLabel, statReference, !!job.assistant_degraded_reference, "参考提取");
+      setCardDegraded(statSummaryLabel, statSummary, !!job.assistant_degraded_summary, "摘要进度");
+      if (!job.assistant_degraded_reference) {
+        statReference.textContent = `${referenceCompleted} / ${referenceTotal}`;
+      }
+      if (!job.assistant_degraded_summary) {
+        statSummary.textContent = `${summaryCompleted} / ${summaryTotal}`;
+      }
       statTranslationBatches.textContent = `${translationBatchCompleted} / ${translationBatchTotal}`;
       statWorkers.textContent = workerTotal ? `${workerActive} / ${workerTotal}` : "0 / 0";
       statCompleted.textContent = `${completed} / ${total}`;

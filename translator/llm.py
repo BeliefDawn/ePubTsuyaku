@@ -527,7 +527,10 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
         if response_format is not None:
             request_kwargs["response_format"] = response_format
         response = self._chat_create(**request_kwargs)
-        return _extract_message_text(response.choices[0].message.content)
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("模型未返回内容（choices 为空）")
+        return _extract_message_text(choices[0].message.content)
 
     def _call_strict_tool(
         self,
@@ -568,7 +571,10 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
             request_kwargs["max_tokens"] = max_tokens
 
         response = self._chat_create(use_strict_client=True, **request_kwargs)
-        message = response.choices[0].message
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("模型未返回内容（choices 为空）")
+        message = choices[0].message
         tool_calls = getattr(message, "tool_calls", None) or []
         if not tool_calls:
             content = _extract_message_text(getattr(message, "content", ""))
@@ -903,7 +909,10 @@ class SakuraLLMClient(BaseLLMClient):
         if max_tokens is not None:
             request_kwargs["max_tokens"] = max_tokens
         response = self.client.chat.completions.create(**request_kwargs)
-        return _extract_message_text(response.choices[0].message.content)
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError("模型未返回内容（choices 为空）")
+        return _extract_message_text(choices[0].message.content)
 
     def extract_reference_patch(
         self,

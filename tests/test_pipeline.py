@@ -10,7 +10,7 @@ from unittest.mock import patch
 from ebooklib import epub
 
 from translator.config import PipelineConfig
-from translator.pipeline import JobCancelledError, run_translation_pipeline, run_translation_pipeline_with_retries
+from translator.pipeline import JobCancelledError, is_retryable_run_error, run_translation_pipeline, run_translation_pipeline_with_retries
 from translator.state import load_progress
 
 
@@ -364,6 +364,48 @@ class PipelineIntegrationTests(unittest.TestCase):
 
             self.assertTrue(output_path.exists())
             self.assertEqual(result["processed_count"], 2)
+
+    def test_summary_degradation_emits_assistant_degraded_event(self):
+        class FailingSummaryClient:
+            def extract_reference_patch(self, *args, **kwargs):
+                return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
+
+            def summarize(self, *args, **kwargs):
+                raise RuntimeError("Mac backend OOM")
+
+            def translate(self, *args, **kwargs):
+                segments = kwargs["segments"]
+                return {segment["id"]: f"[中文] {segment['text']}" for segment in segments}
+
+            def review(self, *args, **kwargs):
+                return ok_review_response()
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            input_path = tmp_path / "input.epub"
+            output_path = tmp_path / "output.epub"
+            progress_path = tmp_path / "progress.json"
+
+            build_sample_epub(input_path)
+            config = make_config(
+                input_path=input_path,
+                output_path=output_path,
+                progress_path=progress_path,
+                provider="openai-compatible",
+                translation_workers=1,
+            )
+
+            events = []
+            with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FailingSummaryClient()):
+                run_translation_pipeline(config, status_callback=lambda body: events.append(body))
+
+            degraded = [e for e in events if e["event"] == "assistant_degraded"]
+            self.assertTrue(any(e.get("phase") == "summary" for e in degraded))
+            self.assertTrue(output_path.exists())
+
+    def test_empty_choices_error_is_retryable(self):
+        exc = RuntimeError("模型未返回内容（choices 为空）")
+        self.assertTrue(is_retryable_run_error(exc))
 
     def test_cancel_event_raises_job_cancelled_without_retry(self):
         class FakeLLMClient:
@@ -1352,20 +1394,21 @@ class PipelineIntegrationTests(unittest.TestCase):
             )
 
             first_shared = {"reference_inputs": []}
+            first_events = []
             with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: FailingClient(first_shared)):
-                with self.assertRaisesRegex(RuntimeError, "boom on reference chapter two"):
-                    run_translation_pipeline(config)
+                run_translation_pipeline(config, status_callback=lambda body: first_events.append(body))
 
+            degraded = [e for e in first_events if e["event"] == "assistant_degraded"]
+            self.assertTrue(any(e.get("phase") == "reference" for e in degraded))
             progress = load_progress(progress_path)
             self.assertEqual(progress["reference_documents"]["chapter1.xhtml"]["status"], "done")
-            self.assertEqual(progress["reference_documents"]["chapter2.xhtml"]["status"], "pending")
+            self.assertEqual(progress["reference_documents"]["chapter2.xhtml"]["status"], "done")
 
             second_shared = {"reference_inputs": []}
             with patch("translator.pipeline._build_llm_client", side_effect=lambda *_: StableClient(second_shared)):
                 run_translation_pipeline(config)
 
-            self.assertTrue(any("参考二。" in item for item in second_shared["reference_inputs"]))
-            self.assertTrue(all("参考一。" not in item for item in second_shared["reference_inputs"]))
+            self.assertEqual(second_shared["reference_inputs"], [])
 
     def test_reference_language_mismatch_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

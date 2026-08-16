@@ -158,6 +158,23 @@ class TranslationPayloadTests(unittest.TestCase):
 
         self.assertIn("浮き輪->浮力环 #泳具", captured["prompt"])
 
+    def test_sakura_request_raises_retryable_error_on_empty_choices(self):
+        client = SakuraLLMClient(
+            api_key="key",
+            base_url="http://localhost:8080/v1",
+            model="model",
+        )
+
+        class FakeResponse:
+            choices = None
+
+        client.client.chat.completions.create = lambda **kwargs: FakeResponse()  # type: ignore[method-assign]
+
+        with self.assertRaises(RuntimeError) as ctx:
+            client._request("prompt", max_tokens=10)
+
+        self.assertIn("未返回内容", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
