@@ -13,6 +13,7 @@
       <button class="theme-btn" onclick="toggleTheme()" title="切换主题">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
+      <button class="ghost topbar-danger" id="shutdown-btn" onclick="shutdownApp()" title="停止服务并退出程序">退出程序</button>
       <a class="ghost" href="{{ url_for('settings_page') }}">设置</a>
     </nav>
     <section class="hero">
@@ -156,6 +157,12 @@
         document.documentElement.classList.add("dark");
       }
     })();
+
+    function shutdownApp() {
+      if (window.confirm("确定要退出程序吗？")) {
+        fetch("/shutdown", { method: "POST" }).catch(function () {});
+      }
+    }
 
     const statusTitle = document.getElementById("status-title");
     const statReference = document.getElementById("stat-reference");

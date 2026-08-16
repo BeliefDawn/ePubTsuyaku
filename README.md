@@ -6,6 +6,12 @@
 
 > 本仓库是对 [Tritium0041/ePubTsuyaku](https://github.com/Tritium0041/ePubTsuyaku) 的增强分支，改动均为增量，未改动核心流水线结构，上游可直接合并吸收。
 
+## 界面截图
+
+| 主页 | 设置 |
+| --- | --- |
+| ![主页](主页截图.png) | ![设置](设置截图.png) |
+
 ### 本地模型支持（樱花 / llama.cpp / LM Studio）
 
 - 新增 `SakuraLLMClient`：使用樱花 v3 提示词（`[History]` / `[Glossary]` / `[Input]`，温度 0.3 / top_p 0.8），接入本地 `llama.cpp` 或 `LM Studio` 的 OpenAI 兼容接口（`http://localhost:8080/v1` 或 `http://localhost:1234/v1`），纯文本按行映射回片段，缺行自动补发。

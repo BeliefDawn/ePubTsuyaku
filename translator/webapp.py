@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -876,6 +877,11 @@ def create_app(project_root: Optional[Path] = None) -> Flask:
         flash("已请求停止当前任务。", "success")
         return redirect(url_for("index"))
 
+    @app.post("/shutdown")
+    def shutdown():
+        threading.Timer(1.0, os._exit, args=(0,)).start()
+        return "已退出", 200
+
     @app.get("/api/status")
     def api_status():
         return jsonify(manager.snapshot())
@@ -902,6 +908,7 @@ def build_web_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = build_web_parser()
     args = parser.parse_args(argv)
+    logging.getLogger("werkzeug").setLevel(logging.WARNING)
     app = create_app()
     app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)
     return 0
