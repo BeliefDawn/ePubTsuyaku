@@ -616,7 +616,11 @@ class JobManager:
             logical_stem = _sanitize_filename_part(Path(input_label or input_path.name).stem)
             progress_name = f"{logical_stem}.{_sanitize_filename_part(target_language)}.json"
             progress_path = self.progress_dir / progress_name
-            output_path = self.project_root / "epubOutput" / f"{logical_stem}.{_sanitize_filename_part(target_language)}.epub"
+            output_name = f"{logical_stem}.{_sanitize_filename_part(target_language)}.epub"
+            if str(input_path).startswith(str(self.upload_dir.resolve())):
+                output_path = self.project_root / "epubOutput" / output_name
+            else:
+                output_path = input_path.with_name(output_name)
 
             translation_workers = max(1, int(form_data.get("translation_workers") or 4))
             review_workers = max(0, int(form_data.get("review_workers") or 0))

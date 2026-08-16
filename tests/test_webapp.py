@@ -474,6 +474,77 @@ class WebAppTests(unittest.TestCase):
                 self.assertEqual(snapshot["job"]["status"], "cancelled")
                 self.assertTrue(snapshot["job"]["can_start_new_job"])
 
+    def test_output_path_defaults_next_to_input(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "epubOutput").mkdir()
+            sample_path = root / "demo.epub"
+            build_sample_epub(sample_path)
+
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            client.post(
+                "/start",
+                data={
+                    "existing_file": str(sample_path),
+                    "source_language": "日语",
+                    "target_language": "中文",
+                    "provider_preset": "mock",
+                    "model": "mock-model",
+                    "translation_workers": "1",
+                    "max_batch_chars": "800",
+                    "max_batch_segments": "16",
+                    "max_review_retries": "0",
+                    "min_review_score": "90",
+                    "recent_summary_limit": "3",
+                    "title_suffix": "（中文译本）",
+                    "reset_progress": "on",
+                },
+                follow_redirects=True,
+            )
+
+            snapshot = self._wait_for_job_completion(client)
+            output_path = Path(snapshot["job"]["output_path"])
+            self.assertEqual(output_path.parent, sample_path.parent)
+            self.assertTrue(output_path.exists())
+
+    def test_upload_output_path_stays_in_epub_output(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "epubOutput").mkdir()
+            sample_path = root / "demo.epub"
+            build_sample_epub(sample_path)
+
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            client.post(
+                "/start",
+                data={
+                    "upload_file": (io.BytesIO(sample_path.read_bytes()), "demo.epub"),
+                    "source_language": "日语",
+                    "target_language": "中文",
+                    "provider_preset": "mock",
+                    "model": "mock-model",
+                    "translation_workers": "1",
+                    "max_batch_chars": "800",
+                    "max_batch_segments": "16",
+                    "max_review_retries": "0",
+                    "min_review_score": "90",
+                    "recent_summary_limit": "3",
+                    "title_suffix": "（中文译本）",
+                    "reset_progress": "on",
+                },
+                content_type="multipart/form-data",
+                follow_redirects=True,
+            )
+
+            snapshot = self._wait_for_job_completion(client)
+            output_path = Path(snapshot["job"]["output_path"])
+            self.assertIn("epubOutput", output_path.parts)
+            self.assertTrue(output_path.exists())
+
     def test_web_ui_auto_resumes_retryable_failures(self):
         shared = {"failed_once": False}
 
