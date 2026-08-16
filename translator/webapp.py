@@ -745,6 +745,10 @@ class JobManager:
                 summary_total_count=book_metadata.get("document_count", 0),
                 book_metadata=book_metadata,
             )
+            if provider == "sakura" and not form_data.get("assistant_enabled"):
+                job.assistant_degraded_reference = True
+                job.assistant_degraded_summary = True
+                job.assistant_degraded_review = True
             self._current_job = job
             self._cancel_event = threading.Event()
             self._thread = threading.Thread(target=self._run_job, args=(job_id, config), daemon=True)
