@@ -10,13 +10,13 @@ from .pipeline import run_translation_pipeline_with_retries
 
 
 def _find_default_input(project_root: Path) -> Path:
-    test_book_dir = project_root / "testBook"
-    if not test_book_dir.exists():
+    library_dir = project_root / "Library"
+    if not library_dir.exists():
         raise RuntimeError("请通过 --input 指定待翻译 epub 文件。")
 
-    epub_files = sorted(test_book_dir.glob("*.epub"))
+    epub_files = sorted(library_dir.glob("*.epub"))
     if not epub_files:
-        raise RuntimeError("testBook/ 下没有找到 epub 文件，请通过 --input 指定。")
+        raise RuntimeError("Library/ 下没有找到 epub 文件，请通过 --input 指定。")
     return epub_files[0]
 
 
@@ -41,7 +41,7 @@ def _resolve_output_path(project_root: Path, input_path: Path, output_arg: Optio
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ePubTsuyaku：使用 LLM 对 EPUB 进行章节级翻译、校对和重建。")
-    parser.add_argument("--input", help="待翻译的 epub 路径。默认读取 testBook/ 下的第一个 epub。")
+    parser.add_argument("--input", help="待翻译的 epub 路径。默认读取 Library/ 下的第一个 epub。")
     parser.add_argument("--reference-epub", help="可选：前作精翻参考 epub 路径。")
     parser.add_argument("--output", help="输出 epub 路径，默认写入 epubOutput/。")
     parser.add_argument("--source-lang", default="日语", help="源语言，默认日语。")

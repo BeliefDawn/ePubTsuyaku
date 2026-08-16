@@ -1,4 +1,4 @@
-# ePubTsuyaku
+﻿# ePubTsuyaku
 
 > ePubTsuyaku is an LLM-based EPUB translation workspace with resumable pipeline, reference-volume consistency, OpenAI-compatible backends, and a local Web UI.
 
@@ -170,13 +170,13 @@ http://127.0.0.1:7860
 
 ### CLI
 
-如果你更偏向命令行，也可以直接运行 `main.py`。不传 `--input` 时，会默认读取 `testBook/` 下找到的第一本 EPUB。
+如果你更偏向命令行，也可以直接运行 `main.py`。不传 `--input` 时，会默认读取 `Library/` 下找到的第一本 EPUB。
 
 最小示例：
 
 ```bash
 uv run --python .venv/bin/python main.py \
-  --input testBook/yourbook.epub \
+  --input Library/yourbook.epub \
   --source-lang 日语 \
   --target-lang 中文
 ```
@@ -185,7 +185,7 @@ uv run --python .venv/bin/python main.py \
 
 ```bash
 uv run --python .venv/bin/python main.py \
-  --input testBook/yourbook.epub \
+  --input Library/yourbook.epub \
   --reference-epub /path/to/previous-volume.zh.epub \
   --source-lang 日语 \
   --target-lang 中文 \
@@ -197,7 +197,7 @@ uv run --python .venv/bin/python main.py \
 
 ```bash
 uv run --python .venv/bin/python main.py \
-  --input testBook/yourbook.epub \
+  --input Library/yourbook.epub \
   --source-lang 日语 \
   --target-lang 中文 \
   --provider mock \
