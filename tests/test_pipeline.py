@@ -1,4 +1,4 @@
-import copy
+﻿import copy
 import threading
 import tempfile
 import unittest
@@ -306,7 +306,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 return {segment["id"]: f"[中文] {segment['text']}" for segment in segments}
 
             def review(self, *args, **kwargs):
-                raise RuntimeError("Mac backend OOM")
+                raise RuntimeError("辅助模型错误")
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -335,7 +335,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
 
             def summarize(self, *args, **kwargs):
-                raise RuntimeError("Mac backend OOM")
+                raise RuntimeError("辅助模型错误")
 
             def translate(self, *args, **kwargs):
                 segments = kwargs["segments"]
@@ -371,7 +371,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                 return {"series_notes": [], "style_notes": [], "characters": [], "terms": []}
 
             def summarize(self, *args, **kwargs):
-                raise RuntimeError("Mac backend OOM")
+                raise RuntimeError("辅助模型错误")
 
             def translate(self, *args, **kwargs):
                 segments = kwargs["segments"]
