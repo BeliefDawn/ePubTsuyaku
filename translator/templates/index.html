@@ -159,9 +159,26 @@
     })();
 
     function shutdownApp() {
-      if (window.confirm("确定要退出程序吗？")) {
-        fetch("/shutdown", { method: "POST" }).catch(function () {});
-      }
+      var btn = document.getElementById("shutdown-btn");
+      btn.disabled = true;
+      btn.textContent = "正在退出…";
+      fetch("/shutdown", { method: "POST" })
+        .then(function () {
+          var msg = document.createElement("div");
+          msg.textContent = "程序已退出，可关闭此页面。";
+          msg.style.cssText =
+            "position:fixed;left:0;right:0;top:0;padding:14px;text-align:center;" +
+            "background:#1b2a4a;color:#e8f1ff;font:14px/1.6 system-ui,sans-serif;z-index:9999;";
+          document.body.appendChild(msg);
+          try {
+            window.close();
+          } catch (e) {}
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = "退出程序";
+          alert("退出请求失败：程序可能已退出，或服务暂时不可用。");
+        });
     }
 
     const statusTitle = document.getElementById("status-title");

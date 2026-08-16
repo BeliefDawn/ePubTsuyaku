@@ -13,4 +13,6 @@ progress.*.json
 web_backup_*/
 PackReadme.md
 uv.lock
+dist/
+build/
 

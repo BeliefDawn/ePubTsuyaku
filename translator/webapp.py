@@ -903,6 +903,7 @@ def create_app(project_root: Optional[Path] = None) -> Flask:
 
     @app.post("/shutdown")
     def shutdown():
+        logging.getLogger("epubtsuyaku").info("shutdown requested from web UI")
         threading.Timer(1.0, os._exit, args=(0,)).start()
         return "已退出", 200
 
