@@ -76,7 +76,7 @@ def _default_form_state() -> Dict[str, Any]:
         "min_review_score": "85",
         "recent_summary_limit": "5",
         "title_suffix": "（中文译本）",
-        "book_dirs": "E:\\Pictures\\小说输出（2023.6.7）",
+        "book_dirs": "Library",
         "reset_progress": False,
     }
 
@@ -155,6 +155,16 @@ def _epub_is_translated_output(path: Path, target_language: str) -> bool:
     return path.name.lower().endswith(f".{suffix}.epub".lower())
 
 
+def _resolve_book_dir(project_root: Path, book_dirs: str) -> Optional[Path]:
+    raw = (book_dirs or "").strip()
+    if not raw:
+        return project_root / "Library"
+    extra = Path(raw).expanduser()
+    if not extra.is_absolute():
+        extra = project_root / extra
+    return extra
+
+
 def discover_epub_files(
     project_root: Path,
     book_dirs: str = "",
@@ -170,7 +180,7 @@ def discover_epub_files(
         raw = raw.strip()
         if not raw:
             continue
-        extra = Path(raw).expanduser()
+        extra = _resolve_book_dir(project_root, raw)
         if extra.is_dir():
             roots.append(extra)
 
@@ -652,10 +662,8 @@ class JobManager:
             progress_name = f"{logical_stem}.{_sanitize_filename_part(target_language)}.json"
             progress_path = self.progress_dir / progress_name
             output_name = f"{logical_stem}.{_sanitize_filename_part(target_language)}.epub"
-            if str(input_path).startswith(str(self.upload_dir.resolve())):
-                output_path = self.project_root / "epubOutput" / output_name
-            else:
-                output_path = input_path.with_name(output_name)
+            library_dir = _resolve_book_dir(self.project_root, form_data.get("book_dirs") or "")
+            output_path = library_dir / output_name
 
             translation_workers = max(1, int(form_data.get("translation_workers") or 4))
             review_workers = max(0, int(form_data.get("review_workers") or 0))

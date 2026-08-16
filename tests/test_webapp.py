@@ -80,7 +80,7 @@ class WebAppTests(unittest.TestCase):
             self.assertIn('value="http://localhost:8080/v1"', settings_html)
             self.assertIn('id="translation_workers" name="translation_workers" type="number" min="1" step="1" value="4"', settings_html)
             self.assertIn('value="4000"', settings_html)
-            self.assertIn('id="book_dirs" name="book_dirs" type="text" value="E:\\Pictures\\小说输出（2023.6.7）"', settings_html)
+            self.assertIn('id="book_dirs" name="book_dirs" type="text" value="Library"', settings_html)
             self.assertIn('id="phase-model-override"', settings_html)
             self.assertIn('"sakura_model": "Sakura-Galtransl-14B-v3.8-Q4_K_M.gguf"', settings_html)
 
@@ -491,10 +491,9 @@ class WebAppTests(unittest.TestCase):
                 self.assertEqual(snapshot["job"]["status"], "cancelled")
                 self.assertTrue(snapshot["job"]["can_start_new_job"])
 
-    def test_output_path_defaults_next_to_input(self):
+    def test_output_path_defaults_to_library(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            (root / "epubOutput").mkdir()
             sample_path = root / "demo.epub"
             build_sample_epub(sample_path)
 
@@ -523,13 +522,49 @@ class WebAppTests(unittest.TestCase):
 
             snapshot = self._wait_for_job_completion(client)
             output_path = Path(snapshot["job"]["output_path"])
-            self.assertEqual(output_path.parent, sample_path.parent)
+            self.assertEqual(output_path.parent, root / "Library")
             self.assertTrue(output_path.exists())
 
-    def test_upload_output_path_stays_in_epub_output(self):
+    def test_output_path_follows_custom_book_dirs(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            (root / "epubOutput").mkdir()
+            sample_path = root / "demo.epub"
+            build_sample_epub(sample_path)
+            library = root / "mylib"
+            library.mkdir()
+
+            app = create_app(project_root=root)
+            client = app.test_client()
+
+            client.post(
+                "/start",
+                data={
+                    "existing_file": str(sample_path),
+                    "book_dirs": str(library),
+                    "source_language": "日语",
+                    "target_language": "中文",
+                    "provider_preset": "mock",
+                    "model": "mock-model",
+                    "translation_workers": "1",
+                    "max_batch_chars": "800",
+                    "max_batch_segments": "16",
+                    "max_review_retries": "0",
+                    "min_review_score": "90",
+                    "recent_summary_limit": "3",
+                    "title_suffix": "（中文译本）",
+                    "reset_progress": "on",
+                },
+                follow_redirects=True,
+            )
+
+            snapshot = self._wait_for_job_completion(client)
+            output_path = Path(snapshot["job"]["output_path"])
+            self.assertEqual(output_path.parent, library)
+            self.assertTrue(output_path.exists())
+
+    def test_upload_output_path_goes_to_library(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
             sample_path = root / "demo.epub"
             build_sample_epub(sample_path)
 
@@ -559,7 +594,7 @@ class WebAppTests(unittest.TestCase):
 
             snapshot = self._wait_for_job_completion(client)
             output_path = Path(snapshot["job"]["output_path"])
-            self.assertIn("epubOutput", output_path.parts)
+            self.assertEqual(output_path.parent, root / "Library")
             self.assertTrue(output_path.exists())
 
     def test_web_ui_auto_resumes_retryable_failures(self):

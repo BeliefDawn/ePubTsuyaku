@@ -6,6 +6,7 @@ __pycache__/
 *.pyc
 .venv/
 epubOutput/*.epub
+Library/
 .webui/
 progress.*.json
 /*.epub

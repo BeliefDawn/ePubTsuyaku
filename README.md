@@ -204,11 +204,27 @@ uv run --python .venv/bin/python main.py \
   --title-suffix "（中文译本）"
 ```
 
+本地樱花 + Mac 辅助模型（摘要 / 校对 / 前作参考）：
+
+```bash
+uv run --python .venv/bin/python main.py \
+  --input yourbook.epub \
+  --source-lang 日语 --target-lang 中文 \
+  --provider sakura \
+  --assistant-base-url http://192.168.5.20:1234/v1 \
+  --assistant-model qwen3-8b --assistant-api-key lm-studio
+```
+
+> 注意：`--provider` 默认是 `auto`（读环境变量），使用本地樱花必须显式 `--provider sakura`。
+> `--assistant-*`（辅助模型）**仅对 `--provider sakura` 生效**，其他预设会忽略这些参数。
+
 默认输出路径：
 
 ```text
-epubOutput/<原文件名>.<目标语言>.epub
+Library/<原文件名>.<目标语言>.epub
 ```
+
+默认输出到项目根 `Library/` 书库目录（输入与输出都在其中）；Web UI 可在设置「书籍目录」修改书库位置，`--output` 可覆盖输出路径。
 
 ## 常用参数
 
@@ -216,7 +232,11 @@ epubOutput/<原文件名>.<目标语言>.epub
 - `--reference-epub`：前作精翻参考 EPUB 路径
 - `--output`：输出文件路径或输出目录
 - `--source-lang` / `--target-lang`：源语言和目标语言
+- `--provider`：`auto` / `sakura` / `openai-compatible` / `mock`（本地樱花用 `sakura`）
+- `--api-key-env`：从指定环境变量读取 API Key
+- `--base-url`：OpenAI 兼容接口的 base_url
 - `--model`：统一指定默认模型
+- `--assistant-base-url` / `--assistant-model` / `--assistant-api-key`：辅助模型（摘要/校对/参考），**仅 `sakura` 生效**
 - `--summary-model` / `--translation-model` / `--review-model`：分阶段指定模型
 - `--translation-workers 4`：翻译阶段 worker 数
 - `--review-workers 0`：校对阶段 worker 数，`0` 表示沿用翻译并发数
@@ -233,7 +253,7 @@ epubOutput/<原文件名>.<目标语言>.epub
 
 ## 输出与状态文件
 
-- `epubOutput/`：默认输出目录
+- `Library/`：默认书库目录（输入与输出都默认在此）
 - `progress.json`：CLI 默认断点文件
 - `.webui/uploads/`：Web UI 上传文件缓存
 - `.webui/progress/`：Web UI 每个任务的独立进度文件

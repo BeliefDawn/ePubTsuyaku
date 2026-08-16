@@ -28,7 +28,7 @@ def _sanitize_filename_part(value: str) -> str:
 def _resolve_output_path(project_root: Path, input_path: Path, output_arg: Optional[str], target_language: str) -> Path:
     suffix = _sanitize_filename_part(target_language)
     if not output_arg:
-        return input_path.with_name(f"{input_path.stem}.{suffix}.epub")
+        return project_root / "Library" / f"{input_path.stem}.{suffix}.epub"
 
     output_path = Path(output_arg)
     if not output_path.is_absolute():
