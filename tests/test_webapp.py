@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from ebooklib import epub
 
-from translator.webapp import create_app, discover_epub_files
+from translator.webapp import _resolve_book_dir, create_app, discover_epub_files
 
 
 def build_sample_epub(
@@ -162,6 +162,40 @@ class WebAppTests(unittest.TestCase):
             self.assertTrue(any(path.endswith("book.epub") for path in paths))
             self.assertTrue(any(path.endswith("external.epub") for path in paths))
             self.assertTrue(any(path.endswith("nested.epub") for path in paths))
+
+    def test_resolve_book_dir_uses_first_of_multiple_paths(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            first = root / "first"
+            second = root / "second"
+
+            resolved = _resolve_book_dir(root, f"{first};{second}")
+            self.assertEqual(resolved, first)
+
+            resolved_relative = _resolve_book_dir(root, "rel;other")
+            self.assertEqual(resolved_relative, root / "rel")
+
+            resolved_default = _resolve_book_dir(root, "")
+            self.assertEqual(resolved_default, root / "Library")
+
+            resolved_empty_parts = _resolve_book_dir(root, ";;")
+            self.assertEqual(resolved_empty_parts, root / "Library")
+
+    def test_discover_epub_files_lists_multiple_semicolon_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+            build_sample_epub(first / "a.epub")
+            build_sample_epub(second / "b.epub")
+
+            files = discover_epub_files(root, f"{first};{second}")
+
+            paths = [item["path"] for item in files]
+            self.assertIn(str((first / "a.epub").resolve()), paths)
+            self.assertIn(str((second / "b.epub").resolve()), paths)
 
     def test_discover_epub_files_filters_to_untranslated(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

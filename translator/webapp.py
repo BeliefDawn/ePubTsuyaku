@@ -157,9 +157,10 @@ def _epub_is_translated_output(path: Path, target_language: str) -> bool:
 
 def _resolve_book_dir(project_root: Path, book_dirs: str) -> Path:
     raw = (book_dirs or "").strip()
-    if not raw:
+    parts = [part.strip() for part in raw.split(";") if part.strip()]
+    if not parts:
         return project_root / "Library"
-    extra = Path(raw).expanduser()
+    extra = Path(parts[0]).expanduser()
     if not extra.is_absolute():
         extra = project_root / extra
     return extra
