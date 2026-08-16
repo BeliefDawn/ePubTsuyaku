@@ -31,6 +31,27 @@ jobs:
       - name: Ad-hoc codesign
         run: codesign --force --deep -s - "dist/EpubTsuyaku.app"
 
+      - name: Smoke test data root
+        run: |
+          set -e
+          "dist/EpubTsuyaku.app/Contents/MacOS/EpubTsuyaku" --port 7899 >/dev/null 2>&1 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+          sleep 8
+          ROOT="$HOME/Library/Application Support/ePubTsuyaku"
+          if [ -f "$ROOT/app.log" ]; then
+            echo "OK: data root = $ROOT"
+          else
+            echo "FAIL: app.log not found in $ROOT"
+            exit 1
+          fi
+          if [ -d "dist/EpubTsuyaku.app/Contents/MacOS/data" ]; then
+            echo "FAIL: data written inside the app bundle"
+            exit 1
+          fi
+          echo "OK: no data inside app bundle"
+          kill $PID 2>/dev/null || true
+
       - name: Stage DMG contents
         run: |
           mkdir -p "dist/dmg"

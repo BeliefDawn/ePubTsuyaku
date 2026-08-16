@@ -17,6 +17,10 @@ def _notify(message: str) -> None:
 
 
 def data_root() -> Path:
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "ePubTsuyaku"
+        base.mkdir(parents=True, exist_ok=True)
+        return base
     exe_dir = Path(sys.executable).resolve().parent
     candidates = [
         exe_dir / "data",
